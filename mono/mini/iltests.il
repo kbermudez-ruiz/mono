@@ -2599,6 +2599,7 @@ END:
 
 	.method public static default int32 test_0_wrap_non_exception_throws () cil managed
 	{
+	  .custom instance void [TestDriver]CategoryAttribute::.ctor(string) = ( 01 00 0C 21 49 4E 54 45 52 50 52 45 54 45 52 00 00 )   // ...!INTERPRETER.
 	  .try {
 	  	    newobj instance void class [mscorlib]System.Object::'.ctor'()
 			throw
@@ -2819,4 +2820,228 @@ END:
 	pop
 	ret
   }
+
+  .method public static int32 test_2_fault () cil managed
+  {
+	.maxstack 16
+	.locals init (int32 V_0)
+    IL_0000:  ldc.i4.0
+    IL_0001:  stloc.0
+    .try
+    {
+      .try
+      {
+        IL_0002:  newobj     instance void [mscorlib]System.Exception::.ctor()
+        IL_0007:  throw
+		leave.s    IL_0018
+      }  // end .try
+	  fault
+      {
+        IL_0009:  ldloc.0
+        IL_000a:  ldc.i4.1
+        IL_000b:  add
+        IL_000c:  stloc.0
+				  endfinally
+      }  // end handler
+      IL_000f:  leave.s    IL_0018
+
+    }  // end .try
+    catch [mscorlib]System.Object
+    {
+      IL_0011:  pop
+      IL_0012:  ldloc.0
+      IL_0013:  ldc.i4.1
+      IL_0014:  add
+      IL_0015:  stloc.0
+      IL_0016:  leave.s    IL_0018
+
+    }  // end handler
+    IL_0018:  ldloc.0
+	ret
+	}
+
+  .method public static int32 test_0_fault_no_exception () cil managed
+  {
+	.maxstack 16
+	.locals init (int32 V_0)
+    IL_0000:  ldc.i4.0
+    IL_0001:  stloc.0
+    .try
+    {
+      .try
+      {
+		leave.s    IL_0018
+      }  // end .try
+	  fault
+      {
+        IL_0009:  ldloc.0
+        IL_000a:  ldc.i4.1
+        IL_000b:  add
+        IL_000c:  stloc.0
+				  endfinally
+      }  // end handler
+      IL_000f:  leave.s    IL_0018
+
+    }  // end .try
+    catch [mscorlib]System.Object
+    {
+      IL_0011:  pop
+      IL_0012:  ldloc.0
+      IL_0013:  ldc.i4.1
+      IL_0014:  add
+      IL_0015:  stloc.0
+      IL_0016:  leave.s    IL_0018
+
+    }  // end handler
+    IL_0018:  ldloc.0
+	ret
+	}
+
+    .field  private static  int32 byte_val
+    .field  private static  int32 short_val
+
+    .method static int32 widen_arguments (unsigned int8 a, int8 b, int16 c, unsigned int16 d) cil managed noinlining
+    {
+		.maxstack 4
+		ldsfld int32 Tests::byte_val
+		starg.s 0
+		ldarg.0
+		ldc.i4 128 //0x80
+		beq L_0
+
+		ldc.i4.1
+		ret
+L_0:
+		ldsfld int32 Tests::byte_val
+		starg.s 1
+		ldarg.1
+		ldc.i4 -128 //-0x80
+		beq L_1
+
+		ldc.i4.2
+		ret
+
+L_1:
+		ldsfld int32 Tests::short_val
+		starg.s 2
+		ldarg.2
+		ldc.i4 -32768 //-0x8000
+		beq L_2
+
+		ldc.i4.3
+		ret
+
+L_2:
+		ldsfld int32 Tests::short_val
+		starg.s 3
+		ldarg.3
+		ldc.i4 32768 //0x8000
+		beq L_3
+
+		ldc.i4.4
+		ret
+
+L_3:
+		ldc.i4.0
+		ret
+    }
+
+	.method public static int32 test_0_implicit_widen_of_argument_stores () cil managed
+	{
+		.maxstack 5
+		/*
+		This test verifies that storing an I4 value from the evail stack into a local variable triggers proper widening.
+		The values are picked so storing them have different values depending on the sign'ness of the local variable.
+		*/
+		ldc.i4 0x180
+		stsfld int32 Tests::byte_val
+		ldc.i4 0x18000
+		stsfld int32 Tests::short_val
+
+		ldc.i4.0
+		ldc.i4.0
+		ldc.i4.0
+		ldc.i4.0
+		call int32 Tests::widen_arguments (unsigned int8 a, int8 b, int16 c, unsigned int16 d)
+		ret
+	}
+
+    .method public static int32 test_0_implicit_widen_of_local_stores () cil managed
+    {
+		.maxstack 4
+		.locals init (
+			unsigned int8	V_0,
+			int8	V_1,
+			int16	V_2,
+			unsigned int16	V_3)
+
+		/*
+		This test verifies that storing an I4 value from the evail stack into a local variable triggers proper widening.
+		The values are picked so storing them have different values depending on the sign'ness of the local variable.
+		*/
+		ldc.i4 0x180
+		stsfld int32 Tests::byte_val
+		ldc.i4 0x18000
+		stsfld int32 Tests::short_val
+
+		ldsfld int32 Tests::byte_val
+		stloc.0
+		ldloc.0
+		ldc.i4 128 //0x80
+		beq L_0
+
+		ldc.i4.1
+		ret
+L_0:
+		ldsfld int32 Tests::byte_val
+		stloc.1
+		ldloc.1
+		ldc.i4 -128 //-0x80
+		beq L_1
+
+		ldc.i4.2
+		ret
+L_1:
+		ldsfld int32 Tests::short_val
+		stloc.2
+		ldloc.2
+		ldc.i4 -32768 //-0x8000
+		beq L_2
+
+		ldc.i4.3
+		ret
+L_2:
+		ldsfld int32 Tests::short_val
+		stloc.3
+		ldloc.3
+		ldc.i4 32768 //0x8000
+		beq L_3
+
+		ldc.i4.4
+		ret
+L_3:
+		ldc.i4.0
+		ret
+    }
+
+	.method public static bool llvm_regress_59436 () {
+		// Code size	   41 (0x29)
+		.maxstack  3
+		.locals init (float64 V_0,
+					  float64 V_1,
+					  valuetype [mscorlib]System.Decimal V_2)
+		IL_0000:  ldc.r8	 1
+		IL_0009:  stloc.0
+		IL_000a:  ldc.r8	 2
+		IL_0013:  stloc.1
+		IL_0014:  ldloc.0
+		IL_0015:  newobj	 instance void [mscorlib]System.Decimal::.ctor(float64)
+		IL_001a:  ldloca.s   V_2
+		IL_001c:  ldloc.1
+		IL_001d:  call	   instance void [mscorlib]System.Decimal::.ctor(float64)
+		IL_0022:  ldloc.2
+		IL_0023:  call	   bool [mscorlib]System.Decimal::op_LessThanOrEqual(valuetype [mscorlib]System.Decimal,
+																			   valuetype [mscorlib]System.Decimal)
+		IL_0028:  ret
+	}
 }

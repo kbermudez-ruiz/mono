@@ -495,8 +495,11 @@ namespace System
 
 		public override int GetHashCode ()
 		{
-			/* same implementation as CoreCLR */
-			return GetType ().GetHashCode ();
+			MethodInfo m;
+
+			m = Method;
+
+			return (m != null ? m.GetHashCode () : GetType ().GetHashCode ()) ^ RuntimeHelpers.GetHashCode (m_target);
 		}
 
 		protected virtual MethodInfo GetMethodImpl ()
@@ -533,6 +536,12 @@ namespace System
 		{
 			if (a == null)
 				return b;
+
+			if (b == null)
+				return a;
+
+			if (a.GetType () != b.GetType ())
+				throw new ArgumentException (Locale.GetText ("Incompatible Delegate Types. First is {0} second is {1}.", a.GetType ().FullName, b.GetType ().FullName));
 
 			return a.CombineImpl (b);
 		}

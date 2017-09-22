@@ -1,3 +1,7 @@
+/**
+ * \file
+ */
+
 #ifndef __MONO_MINI_MIPS_H__
 #define __MONO_MINI_MIPS_H__
 
@@ -233,6 +237,15 @@ typedef struct MonoCompileArch {
 #define MONO_ARCH_EMULATE_FREM 1
 #endif
 
+/*
+ * mips backend misses some instructions that enable emitting of optimal
+ * code on other targets and, additionally, the register allocator gets
+ * confused by this optimization, failing to allocate all hw regs.
+ */
+#if SIZEOF_REGISTER == 4
+#define MONO_ARCH_NO_DIV_WITH_MUL
+#endif
+
 #if SIZEOF_REGISTER == 8
 #define MONO_ARCH_NO_EMULATE_LONG_MUL_OPTS
 #endif
@@ -264,11 +277,12 @@ typedef struct MonoCompileArch {
 #define MONO_ARCH_HAVE_DECOMPOSE_OPTS 1
 #define MONO_ARCH_HAVE_DECOMPOSE_LONG_OPTS 1
 
-#define MONO_ARCH_HAVE_GENERALIZED_IMT_THUNK 1
+#define MONO_ARCH_HAVE_GENERALIZED_IMT_TRAMPOLINE 1
 #define MONO_ARCH_SOFT_DEBUG_SUPPORTED 1
 #define MONO_ARCH_HAVE_SIGCTX_TO_MONOCTX 1
 #define MONO_ARCH_HAVE_SETUP_RESUME_FROM_SIGNAL_HANDLER_CTX 1
 #define MONO_ARCH_GSHARED_SUPPORTED 1
+#define MONO_ARCH_HAVE_INIT_LMF_EXT 1
 
 /* set the next to 0 once inssel-mips.brg is updated */
 #define MIPS_PASS_STRUCTS_BY_VALUE 1

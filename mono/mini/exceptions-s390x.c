@@ -1,20 +1,20 @@
-/*------------------------------------------------------------------*/
-/* 								    */
-/* Name        - exceptions-s390.c				    */
-/* 								    */
-/* Function    - Exception support for S/390.                       */
-/* 								    */
-/* Name	       - Neale Ferguson (Neale.Ferguson@SoftwareAG-usa.com) */
-/* 								    */
-/* Date        - January, 2004					    */
-/* 								    */
-/* Derivation  - From exceptions-x86 & exceptions-ppc		    */
-/* 	         Paolo Molaro (lupus@ximian.com) 		    */
-/* 		 Dietmar Maurer (dietmar@ximian.com)		    */
-/* 								    */
-/* Copyright   - 2001 Ximian, Inc.				    */
-/* 								    */
-/*------------------------------------------------------------------*/
+/**
+ * \file
+ *
+ * Function    - Exception support for S/390.
+ *
+ * Name	       - Neale Ferguson (Neale.Ferguson@SoftwareAG-usa.com)
+ *
+ * Date        - January, 2004
+ *
+ * Derivation  - From exceptions-x86 & exceptions-ppc
+ * 	         Paolo Molaro (lupus@ximian.com)
+ * 		 Dietmar Maurer (dietmar@ximian.com)
+ *
+ * Copyright   - 2001 Ximian, Inc.
+ * Licensed under the MIT license. See LICENSE file in the project root for full license information.
+ *
+ */
 
 /*------------------------------------------------------------------*/
 /*                 D e f i n e s                                    */
@@ -215,7 +215,7 @@ mono_arch_get_call_filter (MonoTrampInfo **info, gboolean aot)
 	g_assert ((code - start) < SZ_THROW); 
 
 	mono_arch_flush_icache(start, code - start);
-	mono_profiler_code_buffer_new (start, code - start, MONO_PROFILER_CODE_BUFFER_EXCEPTION_HANDLING, NULL);
+	MONO_PROFILER_RAISE (jit_code_buffer, (start, code - start, MONO_PROFILER_CODE_BUFFER_EXCEPTION_HANDLING, NULL));
 
 	if (info)
 		*info = mono_tramp_info_create ("call_filter",
@@ -240,6 +240,7 @@ throw_exception (MonoObject *exc, unsigned long ip, unsigned long sp,
 		 gulong *int_regs, gdouble *fp_regs, gint32 *acc_regs, 
 		 guint fpc, gboolean rethrow)
 {
+	MonoError error;
 	MonoContext ctx;
 	int iReg;
 
@@ -261,13 +262,14 @@ throw_exception (MonoObject *exc, unsigned long ip, unsigned long sp,
 	MONO_CONTEXT_SET_BP (&ctx, sp);
 	MONO_CONTEXT_SET_IP (&ctx, ip);
 	
-	if (mono_object_isinst (exc, mono_defaults.exception_class)) {
+	if (mono_object_isinst_checked (exc, mono_defaults.exception_class, &error)) {
 		MonoException *mono_ex = (MonoException*)exc;
 		if (!rethrow) {
 			mono_ex->stack_trace = NULL;
 			mono_ex->trace_ips = NULL;
 		}
 	}
+	mono_error_assert_ok (&error);
 //	mono_arch_handle_exception (&ctx, exc, FALSE);
 	mono_handle_exception (&ctx, exc);
 	mono_restore_context(&ctx);
@@ -360,7 +362,7 @@ mono_arch_get_throw_exception_generic (int size, MonoTrampInfo **info,
 	g_assert ((code - start) < size);
 
 	mono_arch_flush_icache (start, code - start);
-	mono_profiler_code_buffer_new (start, code - start, MONO_PROFILER_CODE_BUFFER_EXCEPTION_HANDLING, NULL);
+	MONO_PROFILER_RAISE (jit_code_buffer, (start, code - start, MONO_PROFILER_CODE_BUFFER_EXCEPTION_HANDLING, NULL));
 
 	if (info)
 		*info = mono_tramp_info_create (corlib ? "throw_corlib_exception" 
@@ -531,7 +533,7 @@ mono_arch_unwind_frame (MonoDomain *domain, MonoJitTlsData *jit_tls,
 static void
 handle_signal_exception (gpointer obj)
 {
-	MonoJitTlsData *jit_tls = mono_native_tls_get_value (mono_jit_tls_id);
+	MonoJitTlsData *jit_tls = mono_tls_get_jit_tls ();
 	MonoContext ctx;
 
 	memcpy (&ctx, &jit_tls->ex_ctx, sizeof (MonoContext));
@@ -562,7 +564,7 @@ mono_arch_handle_exception (void *sigctx, gpointer obj)
 	 * signal is disabled, and we could run arbitrary code though the debugger. So
 	 * resume into the normal stack and do most work there if possible.
 	 */
-	MonoJitTlsData *jit_tls = mono_native_tls_get_value (mono_jit_tls_id);
+	MonoJitTlsData *jit_tls = mono_tls_get_jit_tls ();
 
 	/* Pass the ctx parameter in TLS */
 	mono_sigctx_to_monoctx (sigctx, &jit_tls->ex_ctx);

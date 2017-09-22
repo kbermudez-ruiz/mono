@@ -1,5 +1,6 @@
-/*
- * trace.c: Tracing facilities for the Mono Runtime.
+/**
+ * \file
+ * Tracing facilities for the Mono Runtime.
  *
  * Author:
  *   Paolo Molaro (lupus@ximian.com)
@@ -7,6 +8,7 @@
  *
  * (C) 2002 Ximian, Inc.
  * Copyright 2011 Xamarin, Inc (http://www.xamarin.com)
+ * Licensed under the MIT license. See LICENSE file in the project root for full license information.
  */
 
 #include <config.h>
@@ -24,30 +26,11 @@
 #include <mono/utils/mono-memory-model.h>
 #include "trace.h"
 
-#if defined (PLATFORM_ANDROID) || (defined (TARGET_IOS) && defined (TARGET_IOS))
+#if defined (HOST_ANDROID) || (defined (TARGET_IOS) && defined (TARGET_IOS))
 #  undef printf
 #  define printf(...) g_log("mono", G_LOG_LEVEL_MESSAGE, __VA_ARGS__)
 #  undef fprintf
 #  define fprintf(__ignore, ...) g_log ("mono-gc", G_LOG_LEVEL_MESSAGE, __VA_ARGS__)
-#endif
-
-#ifdef __GNUC__
-
-#define RETURN_ADDRESS_N(N) (__builtin_extract_return_addr (__builtin_return_address (N)))
-#define RETURN_ADDRESS() RETURN_ADDRESS_N(0)
-
-#elif defined(_MSC_VER)
-
-#include <intrin.h>
-#pragma intrinsic(_ReturnAddress)
-
-#define RETURN_ADDRESS() _ReturnAddress()
-#define RETURN_ADDRESS_N(N) NULL
-
-#else
-
-#error "Missing return address intrinsics implementation"
-
 #endif
 
 static MonoTraceSpec trace_spec;
@@ -100,17 +83,21 @@ mono_trace_eval (MonoMethod *method)
 		
 		switch (op->op){
 		case MONO_TRACEOP_ALL:
-			inc = 1; break;
+			inc = 1;
+			break;
 		case MONO_TRACEOP_PROGRAM:
 			if (trace_spec.assembly && (method->klass->image == mono_assembly_get_image (trace_spec.assembly)))
-				inc = 1; break;
+				inc = 1;
+			break;
 		case MONO_TRACEOP_WRAPPER:
 			if ((method->wrapper_type == MONO_WRAPPER_NATIVE_TO_MANAGED) ||
 				(method->wrapper_type == MONO_WRAPPER_MANAGED_TO_NATIVE))
-				inc = 1; break;
+				inc = 1;
+			break;
 		case MONO_TRACEOP_METHOD:
 			if (mono_method_desc_full_match ((MonoMethodDesc *) op->data, method))
-				inc = 1; break;
+				inc = 1;
+			break;
 		case MONO_TRACEOP_CLASS:
 			if (strcmp (method->klass->name_space, op->data) == 0)
 				if (strcmp (method->klass->name, op->data2) == 0)
@@ -118,18 +105,21 @@ mono_trace_eval (MonoMethod *method)
 			break;
 		case MONO_TRACEOP_ASSEMBLY:
 			if (strcmp (mono_image_get_name (method->klass->image), op->data) == 0)
-				inc = 1; break;
+				inc = 1;
+			break;
 		case MONO_TRACEOP_NAMESPACE:
 			if (strcmp (method->klass->name_space, op->data) == 0)
 				inc = 1;
+			break;
 		case MONO_TRACEOP_EXCEPTION:
 			break;
 		}
-		if (op->exclude){
+		if (op->exclude) {
 			if (inc)
 				include = 0;
-		} else if (inc)
+		} else if (inc) {
 			include = 1;
+		}
 	}
 	return include;
 }
@@ -158,9 +148,10 @@ static void get_string (void)
 	}
 	if (value != NULL)
 		g_free (value);
-	value = (char *)g_malloc (input - start + 1);
-	strncpy (value, start, input-start);
-	value [input-start] = 0;
+	size_t len = input - start;
+	value = (char *)g_malloc (len + 1);
+	memcpy (value, start, len);
+	value [len] = 0;
 }
 
 enum Token {
@@ -533,7 +524,7 @@ mono_trace_enter_method (MonoMethod *method, char *ebp)
 					g_free (as);
 				} else if (klass == mono_defaults.int32_class) {
 					printf ("[INT32:%p:%d], ", o, *(gint32 *)((char *)o + sizeof (MonoObject)));
-				} else if (klass == mono_defaults.monotype_class) {
+				} else if (klass == mono_defaults.runtimetype_class) {
 					printf ("[TYPE:%s], ", mono_type_full_name (((MonoReflectionType*)o)->type));
 				} else
 					printf ("[%s.%s:%p], ", klass->name_space, klass->name, o);

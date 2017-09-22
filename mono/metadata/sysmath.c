@@ -1,5 +1,6 @@
-/*
- * sysmath.c: these are based on bob smith's csharp routines 
+/**
+ * \file
+ * these are based on bob smith's csharp routines 
  *
  * Author:
  *	Mono Project (http://www.mono-project.com)
@@ -8,6 +9,7 @@
  * Copyright 2001-2003 Ximian, Inc (http://www.ximian.com)
  * Copyright 2004-2009 Novell, Inc (http://www.novell.com)
  * Copyright 2015 Xamarin, Inc (https://www.xamarin.com)
+ * Licensed under the MIT license. See LICENSE file in the project root for full license information.
  */
 
 //

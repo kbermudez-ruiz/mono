@@ -1,3 +1,6 @@
+/**
+ * \file
+ */
 
 #ifndef __MONO_METADATA_INTERNALS_H__
 #define __MONO_METADATA_INTERNALS_H__
@@ -47,6 +50,11 @@ struct _MonoType {
 #define MONO_PROCESSOR_ARCHITECTURE_IA64 3
 #define MONO_PROCESSOR_ARCHITECTURE_AMD64 4
 #define MONO_PROCESSOR_ARCHITECTURE_ARM 5
+
+#if !defined(DISABLE_JIT) || defined(ENABLE_INTERPRETER)
+/* Some VES is available at runtime */
+#define ENABLE_ILGEN
+#endif
 
 struct _MonoAssemblyName {
 	const char *name;
@@ -175,10 +183,12 @@ typedef struct {
 
 struct _MonoImage {
 	/*
-	 * The number of assemblies which reference this MonoImage though their 'image'
-	 * field plus the number of images which reference this MonoImage through their 
-	 * 'modules' field, plus the number of threads holding temporary references to
-	 * this image between calls of mono_image_open () and mono_image_close ().
+	 * This count is incremented during these situations:
+	 *   - An assembly references this MonoImage though its 'image' field
+	 *   - This MonoImage is present in the 'files' field of an image
+	 *   - This MonoImage is present in the 'modules' field of an image
+	 *   - A thread is holding a temporary reference to this MonoImage between
+	 *     calls to mono_image_open and mono_image_close ()
 	 */
 	int   ref_count;
 
@@ -209,6 +219,9 @@ struct _MonoImage {
 
 	/* Whenever this image contains metadata only without PE data */
 	guint8 metadata_only : 1;
+
+	/*  Whether this image belongs to load-from context */
+	guint8 load_from_context: 1;
 
 	guint8 checked_module_cctor : 1;
 	guint8 has_module_cctor : 1;
@@ -246,6 +259,10 @@ struct _MonoImage {
 			    
 	const char          *tables_base;
 
+	/* For PPDB files */
+	guint64 referenced_tables;
+	int *referenced_table_rows;
+
 	/**/
 	MonoTableInfo        tables [MONO_TABLE_NUM];
 
@@ -258,18 +275,20 @@ struct _MonoImage {
 	MonoAssembly **references;
 	int nreferences;
 
-	/* Code files in the assembly. */
+	/* Code files in the assembly. The main assembly has a "file" table and also a "module"
+	 * table, where the module table is a subset of the file table. We track both lists,
+	 * and because we can lazy-load them at different times we reference-increment both.
+	 */
 	MonoImage **modules;
 	guint32 module_count;
 	gboolean *modules_loaded;
 
-	/*
-	 * Files in the assembly. Items are either NULL or alias items in modules, so this does not impact ref_count.
-	 * Protected by the image lock.
-	 */
 	MonoImage **files;
+	guint32 file_count;
 
 	gpointer aot_module;
+
+	guint8 aotid[16];
 
 	/*
 	 * The Assembly this image was loaded from.
@@ -291,7 +310,7 @@ struct _MonoImage {
 	MonoConcurrentHashTable *field_cache; /*protected by the image lock*/
 
 	/* indexed by typespec tokens. */
-	GHashTable *typespec_cache; /* protected by the image lock */
+	MonoConcurrentHashTable *typespec_cache; /* protected by the image lock */
 	/* indexed by token */
 	GHashTable *memberref_signatures;
 	GHashTable *helper_signatures;
@@ -334,6 +353,8 @@ struct _MonoImage {
 	GHashTable *ldflda_wrapper_cache;
 	GHashTable *stfld_wrapper_cache;
 	GHashTable *isinst_cache;
+
+	GHashTable *icall_wrapper_cache;
 	GHashTable *castclass_cache;
 	GHashTable *proxy_isinst_cache;
 	GHashTable *rgctx_template_hash; /* LOCKING: templates lock */
@@ -414,7 +435,8 @@ typedef struct {
 	MonoImage **images;
 
 	// Generic-specific caches
-	GHashTable *gclass_cache, *ginst_cache, *gmethod_cache, *gsignature_cache;
+	GHashTable *ginst_cache, *gmethod_cache, *gsignature_cache;
+	MonoConcurrentHashTable *gclass_cache;
 
 	MonoWrapperCaches wrapper_caches;
 
@@ -493,7 +515,6 @@ struct _MonoDynamicImage {
 	GHashTable *method_aux_hash;
 	GHashTable *vararg_aux_hash;
 	MonoGHashTable *generic_def_objects;
-	MonoGHashTable *methodspec;
 	/*
 	 * Maps final token values to the object they describe.
 	 */
@@ -633,6 +654,12 @@ mono_image_alloc0 (MonoImage *image, guint size);
 char*
 mono_image_strdup (MonoImage *image, const char *s);
 
+char*
+mono_image_strdup_vprintf (MonoImage *image, const char *format, va_list args);
+
+char*
+mono_image_strdup_printf (MonoImage *image, const char *format, ...) MONO_ATTR_FORMAT_PRINTF(2,3);;
+
 GList*
 g_list_prepend_image (MonoImage *image, GList *list, gpointer data);
 
@@ -721,19 +748,6 @@ mono_metadata_interfaces_from_typedef_full  (MonoImage             *image,
 											 MonoGenericContext    *context,
 											 MonoError *error);
 
-MonoArrayType *
-mono_metadata_parse_array_full              (MonoImage             *image,
-					     MonoGenericContainer  *container,
-					     const char            *ptr,
-					     const char           **rptr);
-
-MONO_API MonoType *
-mono_metadata_parse_type_full               (MonoImage             *image,
-					     MonoGenericContainer  *container,
-					     short                  opt_attrs,
-					     const char            *ptr,
-					     const char           **rptr);
-
 MONO_API MonoMethodSignature *
 mono_metadata_parse_method_signature_full   (MonoImage             *image,
 					     MonoGenericContainer  *generic_container,
@@ -745,7 +759,12 @@ mono_metadata_parse_method_signature_full   (MonoImage             *image,
 MONO_API MonoMethodHeader *
 mono_metadata_parse_mh_full                 (MonoImage             *image,
 					     MonoGenericContainer  *container,
-					     const char            *ptr);
+					     const char            *ptr,
+						 MonoError *error);
+
+MonoMethodSignature  *mono_metadata_parse_signature_checked (MonoImage *image, 
+							     uint32_t    token,
+							     MonoError *error);
 
 gboolean
 mono_method_get_header_summary (MonoMethod *method, MonoMethodHeaderSummary *summary);
@@ -772,6 +791,9 @@ MonoGenericInst *
 mono_metadata_get_generic_inst              (int 		    type_argc,
 					     MonoType 		  **type_argv);
 
+MonoGenericInst *
+mono_metadata_get_canonical_generic_inst    (MonoGenericInst *candidate);
+
 MonoGenericClass *
 mono_metadata_lookup_generic_class          (MonoClass		   *gclass,
 					     MonoGenericInst	   *inst,
@@ -786,7 +808,7 @@ gboolean
 mono_metadata_generic_param_equal (MonoGenericParam *p1, MonoGenericParam *p2);
 
 void mono_dynamic_stream_reset  (MonoDynamicStream* stream);
-void mono_assembly_addref       (MonoAssembly *assembly);
+MONO_API void mono_assembly_addref       (MonoAssembly *assembly);
 void mono_assembly_load_friends (MonoAssembly* ass);
 gboolean mono_assembly_has_skip_verification (MonoAssembly* ass);
 
@@ -807,6 +829,10 @@ mono_assembly_name_parse_full 		     (const char	   *name,
 					      gboolean save_public_key,
 					      gboolean *is_version_defined,
 						  gboolean *is_token_defined);
+
+gboolean
+mono_assembly_fill_assembly_name_full (MonoImage *image, MonoAssemblyName *aname, gboolean copyBlobs);
+
 
 MONO_API guint32 mono_metadata_get_generic_param_row (MonoImage *image, guint32 token, guint32 *owner);
 
@@ -913,6 +939,21 @@ mono_image_set_description (MonoImageSet *);
 
 MonoImageSet *
 mono_find_image_set_owner (void *ptr);
+
+MONO_API void
+mono_loader_register_module (const char *name, MonoDl *module);
+
+gboolean
+mono_assembly_is_problematic_version (const char *name, guint16 major, guint16 minor, guint16 build, guint16 revision);
+
+void
+mono_ginst_get_desc (GString *str, MonoGenericInst *ginst);
+
+void
+mono_loader_set_strict_strong_names (gboolean enabled);
+
+gboolean
+mono_loader_get_strict_strong_names (void);
 
 #endif /* __MONO_METADATA_INTERNALS_H__ */
 

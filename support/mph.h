@@ -54,11 +54,9 @@
 #  endif
 #endif /* !defined(EOVERFLOW) */
 
-#if !defined (HOST_WIN32)
-
 /* 
- * Solaris doesn't define these BSD values, and if they're not present then
- * map.c:Mono_Posix_FromSeekFlags() breaks badly; see:
+ * Solaris/Windows don't define these BSD values, and if they're not present
+ * then map.c:Mono_Posix_FromSeekFlags() breaks badly; see:
  * http://bugzilla.gnome.org/show_bug.cgi?id=370081
  */
 
@@ -74,15 +72,17 @@
 #define L_XTND SEEK_END
 #endif /* ndef L_XTND */
 
+#if !defined (HOST_WIN32)
+
 /*
  * OS X doesn't define MAP_ANONYMOUS, but it does define MAP_ANON.
  * Alias them to fix: https://bugzilla.xamarin.com/show_bug.cgi?id=3419
  */
-#ifdef PLATFORM_MACOSX
+#ifdef HOST_DARWIN
 #ifndef MAP_ANONYMOUS
 #define MAP_ANONYMOUS MAP_ANON
 #endif  /* ndef MAP_ANONYMOUS */
-#endif  /* ndef PLATFORM_MACOSX */
+#endif  /* ndef HOST_DARWIN */
 
 /*
  * XATTR_AUTO is a synonym for 0 within XattrFlags, but most systems don't

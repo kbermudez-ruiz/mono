@@ -1,3 +1,7 @@
+/**
+ * \file
+ */
+
 #ifndef __MONO_DEBUG_HELPERS_H__
 #define __MONO_DEBUG_HELPERS_H__
 
@@ -39,6 +43,7 @@ MONO_API MonoMethod*     mono_method_desc_search_in_class (MonoMethodDesc *desc,
 MONO_API MonoMethod*     mono_method_desc_search_in_image (MonoMethodDesc *desc, MonoImage *image);
 
 MONO_API char*           mono_method_full_name (MonoMethod *method, mono_bool signature);
+MONO_API char*           mono_method_get_reflection_name (MonoMethod *method);
 
 MONO_API char*           mono_field_full_name (MonoClassField *field);
 

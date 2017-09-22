@@ -13,6 +13,7 @@ using System;
 using System.Globalization;
 using System.Security.Principal;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Reflection;
 using System.Collections.Generic;
 using SD = System.Diagnostics;
@@ -93,25 +94,6 @@ namespace MonoTests.System.Threading
 		TimeSpan Negative = new TimeSpan (-20000);	// really negative
 		//TimeSpan MaxValue = TimeSpan.FromMilliseconds ((long) Int32.MaxValue);
 		TimeSpan TooLarge = TimeSpan.FromMilliseconds ((long) Int32.MaxValue + 1);
-
-		static bool is_win32;
-		static bool is_mono;
-
-		static ThreadTest ()
-		{
-			switch (Environment.OSVersion.Platform) {
-			case PlatformID.Win32NT:
-			case PlatformID.Win32S:
-			case PlatformID.Win32Windows:
-			case PlatformID.WinCE:
-				is_win32 = true;
-				break;
-			}
-
-			// check a class in mscorlib to determine if we're running on Mono
-			if (Type.GetType ("System.MonoType", false) != null)
-				is_mono = true;
-		}
 
 		//Some Classes to test as threads
 		private class C1Test
@@ -327,8 +309,6 @@ namespace MonoTests.System.Threading
 		[Category ("NotDotNet")] // it hangs.
 		public void TestStart()
 		{
-			if (is_win32 && is_mono)
-				Assert.Fail ("This test fails on Win32. The test should be fixed.");
 		{
 			C1Test test1 = new C1Test();
 			Thread TestThread = new Thread(new ThreadStart(test1.TestMethod));
@@ -370,9 +350,6 @@ namespace MonoTests.System.Threading
 		[Test]
 		public void TestApartmentState ()
 		{
-			if (is_win32 && is_mono)
-				Assert.Fail ("This test fails on mono on win32. Our runtime should be fixed.");
-
 			C2Test test1 = new C2Test();
 			Thread TestThread = new Thread(new ThreadStart(test1.TestMethod));
 			Assert.AreEqual (ApartmentState.Unknown, TestThread.ApartmentState, "#1");
@@ -390,9 +367,6 @@ namespace MonoTests.System.Threading
 		[Category ("NotWorking")] // setting the priority of a Thread before it is started isn't implemented in Mono yet
 		public void TestPriority1()
 		{
-			if (is_win32 && is_mono)
-				Assert.Fail ("This test fails on mono on Win32. Our runtime should be fixed.");
-
 			C2Test test1 = new C2Test();
 			Thread TestThread = new Thread(new ThreadStart(test1.TestMethod));
 			try {
@@ -487,9 +461,6 @@ namespace MonoTests.System.Threading
 		[Test]
 		public void TestIsBackground1 ()
 		{
-			if (is_win32 && is_mono)
-				Assert.Fail ("This test fails on mono on Win32. Our runtime should be fixed.");
-
 			C2Test test1 = new C2Test();
 			Thread TestThread = new Thread(new ThreadStart(test1.TestMethod));
 			try {
@@ -534,9 +505,6 @@ namespace MonoTests.System.Threading
 		[Test]
 		public void TestName()
 		{
-			if (is_win32 && is_mono)
-				Assert.Fail ("This test fails on mono on Win32. Our runtime should be fixed.");
-
 			C2Test test1 = new C2Test();
 			Thread TestThread = new Thread(new ThreadStart(test1.TestMethod));
 			try {
@@ -572,37 +540,6 @@ namespace MonoTests.System.Threading
 			Thread t = new Thread (new ThreadStart (Rename));
 			t.Name = "a";
 			t.Name = "b";
-		}
-
-		bool rename_finished;
-		bool rename_failed;
-
-		[Test]
-		public void RenameTpThread ()
-		{
-			object monitor = new object ();
-			ThreadPool.QueueUserWorkItem (new WaitCallback (Rename_callback), monitor);
-			lock (monitor) {
-				if (!rename_finished)
-					Monitor.Wait (monitor);
-			}
-			Assert.IsTrue (!rename_failed);
-		}
-
-		void Rename_callback (object o) {
-			Thread.CurrentThread.Name = "a";
-			try {
-				Thread.CurrentThread.Name = "b";
-				//Console.WriteLine ("Thread name is: {0}", Thread.CurrentThread.Name);
-			} catch (Exception e) {
-				//Console.Error.WriteLine (e);
-				rename_failed = true;
-			}
-			object monitor = o;
-			lock (monitor) {
-				rename_finished = true;
-				Monitor.Pulse (monitor);
-			}
 		}
 
 		[Test]
@@ -727,9 +664,6 @@ namespace MonoTests.System.Threading
 		[Test]
 		public void TestThreadState ()
 		{
-			if (is_win32 && is_mono)
-				Assert.Fail ("This test fails on mono on Win32. Our runtime should be fixed.");
-
 			//TODO: Test The rest of the possible transitions
 			C2Test test1 = new C2Test();
 			Thread TestThread = new Thread(new ThreadStart(test1.TestMethod));
@@ -861,9 +795,6 @@ namespace MonoTests.System.Threading
 		[Category("NotDotNet")] // On MS, ThreadStateException is thrown on Abort: "Thread is suspended; attempting to abort"
 		public void TestSuspendAbort ()
 		{
-			if (is_win32 && is_mono)
-				Assert.Fail ("This test fails on Win32. The test should be fixed.");
-
 			Thread t = new Thread (new ThreadStart (DoCount));
 			t.IsBackground = true;
 			t.Start ();
@@ -929,7 +860,6 @@ namespace MonoTests.System.Threading
 		}
 		
 		[Test]
-		[Category ("NotDotNet")] // it crashes nunit.
 		public void Test_InterruptCurrentThread ()
 		{
 			ManualResetEvent mre = new ManualResetEvent (false);
@@ -968,6 +898,7 @@ namespace MonoTests.System.Threading
 
 #if MONO_FEATURE_MULTIPLE_APPDOMAINS
 		[Test]
+		[Category ("NotDotNet")]
 		public void CurrentThread_Domains ()
 		{
 			AppDomain ad = AppDomain.CreateDomain ("foo");
@@ -977,6 +908,23 @@ namespace MonoTests.System.Threading
 			AppDomain.Unload (ad);
 		}
 #endif // MONO_FEATURE_MULTIPLE_APPDOMAINS
+
+		[Test]
+		public void SetNameInThreadPoolThread ()
+		{
+			Task t = Task.Run (delegate () {
+				Thread.CurrentThread.Name = "ThreadName1";
+				Assert.AreEqual (Thread.CurrentThread.Name, "ThreadName1", "#1");
+
+				try {
+					Thread.CurrentThread.Name = "ThreadName2";
+					Assert.Fail ("#2");
+				} catch (InvalidOperationException) {
+				}
+			});
+
+			t.Wait ();
+		}
 
 		void CheckIsRunning (string s, Thread t)
 		{
@@ -1401,9 +1349,9 @@ namespace MonoTests.System.Threading
 		
 		public static void WhileAlive (Thread t, bool alive, string s)
 		{
-			DateTime ti = DateTime.Now;
+			var sw = SD.Stopwatch.StartNew ();
 			while (t.IsAlive == alive) {
-				if ((DateTime.Now - ti).TotalSeconds > 10) {
+				if (sw.Elapsed.TotalSeconds > 10) {
 					if (alive) Assert.Fail ("Timeout while waiting for not alive state. " + s);
 					else Assert.Fail ("Timeout while waiting for alive state. " + s);
 				}
@@ -1412,12 +1360,12 @@ namespace MonoTests.System.Threading
 
 		public static bool WhileAliveOrStop (Thread t, bool alive, string s)
 		{
-			DateTime ti = DateTime.Now;
+			var sw = SD.Stopwatch.StartNew ();
 			while (t.IsAlive == alive) {
 				if (t.ThreadState == ThreadState.Stopped)
 					return false;
 
-				if ((DateTime.Now - ti).TotalSeconds > 10) {
+				if (sw.Elapsed.TotalSeconds > 10) {
 					if (alive) Assert.Fail ("Timeout while waiting for not alive state. " + s);
 					else Assert.Fail ("Timeout while waiting for alive state. " + s);
 				}

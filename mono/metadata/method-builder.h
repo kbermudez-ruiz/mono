@@ -1,5 +1,6 @@
-/*
- * method-builder.h: Functions for creating IL methods at runtime.
+/**
+ * \file
+ * Functions for creating IL methods at runtime.
  * 
  * Author:
  *   Paolo Molaro (lupus@ximian.com)
@@ -24,11 +25,11 @@ typedef struct _MonoMethodBuilder {
 	MonoMethod *method;
 	char *name;
 	gboolean no_dup_name;
-#ifndef DISABLE_JIT
+#ifdef ENABLE_ILGEN
 	GList *locals_list;
 	int locals;
 	gboolean dynamic;
-	gboolean skip_visibility;
+	gboolean skip_visibility, init_locals;
 	guint32 code_size, pos;
 	unsigned char *code;
 	int num_clauses;
@@ -52,7 +53,7 @@ mono_mb_create_method (MonoMethodBuilder *mb, MonoMethodSignature *signature, in
 guint32
 mono_mb_add_data (MonoMethodBuilder *mb, gpointer data);
 
-#ifndef DISABLE_JIT
+#ifdef ENABLE_ILGEN
 void
 mono_mb_patch_addr (MonoMethodBuilder *mb, int pos, int value);
 

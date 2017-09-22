@@ -1,10 +1,12 @@
-/*
- * metadata/gc-internals.h: Internal GC interface
+/**
+ * \file
+ * Internal GC interface
  *
  * Author: Paolo Molaro <lupus@ximian.com>
  *
  * (C) 2002 Ximian, Inc.
  * Copyright 2012 Xamarin Inc (http://www.xamarin.com)
+ * Licensed under the MIT license. See LICENSE file in the project root for full license information.
  */
 
 #ifndef __MONO_METADATA_GC_INTERNAL_H__
@@ -15,7 +17,6 @@
 #include <mono/metadata/object-internals.h>
 #include <mono/metadata/threads-types.h>
 #include <mono/sgen/gc-internal-agnostic.h>
-#include <mono/utils/gc_wrapper.h>
 
 #define mono_domain_finalizers_lock(domain) mono_os_mutex_lock (&(domain)->finalizable_objects_hash_lock);
 #define mono_domain_finalizers_unlock(domain) mono_os_mutex_unlock (&(domain)->finalizable_objects_hash_lock);
@@ -24,16 +25,6 @@
 #define MONO_GC_REGISTER_ROOT_PINNING(x,src,msg) mono_gc_register_root ((char*)&(x), sizeof(x), MONO_GC_DESCRIPTOR_NULL, (src), (msg))
 
 #define MONO_GC_UNREGISTER_ROOT(x) mono_gc_deregister_root ((char*)&(x))
-
-/*
- * Register a memory location as a root pointing to memory allocated using
- * mono_gc_alloc_fixed (). This includes MonoGHashTable.
- */
-/* The result of alloc_fixed () is not GC tracked memory */
-#define MONO_GC_REGISTER_ROOT_FIXED(x,src,msg) do { \
-	if (!mono_gc_is_moving ())				\
-		MONO_GC_REGISTER_ROOT_PINNING ((x),(src),(msg)); \
-	} while (0)
 
 /*
  * Return a GC descriptor for an array containing N pointers to memory allocated
@@ -102,8 +93,6 @@ extern void mono_gc_set_stack_end (void *stack_end);
 gboolean mono_object_is_alive (MonoObject* obj);
 gboolean mono_gc_is_finalizer_thread (MonoThread *thread);
 gpointer mono_gc_out_of_memory (size_t size);
-void     mono_gc_enable_events (void);
-void     mono_gc_enable_alloc_events (void);
 
 void mono_gchandle_set_target (guint32 gchandle, MonoObject *obj);
 
@@ -132,8 +121,6 @@ gboolean mono_gc_user_markers_supported (void);
  * The memory is non-moving and it will be explicitly deallocated.
  * size bytes will be available from the returned address (ie, descr
  * must not be stored in the returned memory)
- * NOTE: Under Boehm, this returns memory allocated using GC_malloc, so the result should
- * be stored into a location registered using MONO_GC_REGISTER_ROOT_FIXED ().
  */
 void* mono_gc_alloc_fixed            (size_t size, MonoGCDescriptor descr, MonoGCRootSource source, const char *msg);
 void  mono_gc_free_fixed             (void* addr);
@@ -143,10 +130,6 @@ gboolean mono_gchandle_is_in_domain (guint32 gchandle, MonoDomain *domain);
 void     mono_gchandle_free_domain  (MonoDomain *domain);
 
 typedef void (*FinalizerThreadCallback) (gpointer user_data);
-
-/* if there are finalizers to run, run them. Returns the number of finalizers run */
-gboolean mono_gc_pending_finalizers (void);
-void     mono_gc_finalize_notify    (void);
 
 void* mono_gc_alloc_pinned_obj (MonoVTable *vtable, size_t size);
 void* mono_gc_alloc_obj (MonoVTable *vtable, size_t size);
@@ -160,9 +143,11 @@ void  mono_gc_register_for_finalization (MonoObject *obj, void *user_data);
 void  mono_gc_add_memory_pressure (gint64 value);
 MONO_API int   mono_gc_register_root (char *start, size_t size, MonoGCDescriptor descr, MonoGCRootSource source, const char *msg);
 void  mono_gc_deregister_root (char* addr);
-int   mono_gc_finalizers_for_domain (MonoDomain *domain, MonoObject **out_array, int out_size);
+void  mono_gc_finalize_domain (MonoDomain *domain);
 void  mono_gc_run_finalize (void *obj, void *data);
 void  mono_gc_clear_domain (MonoDomain * domain);
+/* Signal early termination of finalizer processing inside the gc */
+void  mono_gc_suspend_finalizers (void);
 
 
 /* 
@@ -184,14 +169,21 @@ void mono_gc_wbarrier_set_root (gpointer ptr, MonoObject *value);
 	mono_gc_wbarrier_set_root (&((s)->fieldname), (MonoObject*)value); \
 } while (0)
 
-void  mono_gc_finalize_threadpool_threads (void);
-
 /* fast allocation support */
+
+typedef enum {
+	// Regular fast path allocator.
+	MANAGED_ALLOCATOR_REGULAR,
+	// Managed allocator that just calls into the runtime.
+	MANAGED_ALLOCATOR_SLOW_PATH,
+	// Managed allocator that works like the regular one but also calls into the profiler.
+	MANAGED_ALLOCATOR_PROFILER,
+} ManagedAllocatorVariant;
 
 int mono_gc_get_aligned_size_for_allocator (int size);
 MonoMethod* mono_gc_get_managed_allocator (MonoClass *klass, gboolean for_box, gboolean known_instance_size);
 MonoMethod* mono_gc_get_managed_array_allocator (MonoClass *klass);
-MonoMethod *mono_gc_get_managed_allocator_by_type (int atype, gboolean slowpath);
+MonoMethod *mono_gc_get_managed_allocator_by_type (int atype, ManagedAllocatorVariant variant);
 
 guint32 mono_gc_get_managed_allocator_types (void);
 
@@ -203,7 +195,10 @@ MonoMethod* mono_gc_get_specific_write_barrier (gboolean is_concurrent);
 MonoMethod* mono_gc_get_write_barrier (void);
 
 /* Fast valuetype copy */
-void mono_gc_wbarrier_value_copy_bitmap (gpointer dest, gpointer src, int size, unsigned bitmap);
+/* WARNING: [dest, dest + size] must be within the bounds of a single type, otherwise the GC will lose remset entries */
+void mono_gc_wbarrier_range_copy (gpointer dest, gpointer src, int size);
+void* mono_gc_get_range_copy_func (void);
+
 
 /* helper for the managed alloc support */
 MonoString *
@@ -293,8 +288,6 @@ gboolean mono_gc_card_table_nursery_check (void);
 
 void* mono_gc_get_nursery (int *shift_bits, size_t *size);
 
-void mono_gc_set_current_thread_appdomain (MonoDomain *domain);
-
 void mono_gc_set_skip_thread (gboolean skip);
 
 #ifndef HOST_WIN32
@@ -357,6 +350,14 @@ BOOL APIENTRY mono_gc_dllmain (HMODULE module_handle, DWORD reason, LPVOID reser
 guint mono_gc_get_vtable_bits (MonoClass *klass);
 
 void mono_gc_register_altstack (gpointer stack, gint32 stack_size, gpointer altstack, gint32 altstack_size);
+
+gboolean mono_gc_is_critical_method (MonoMethod *method);
+
+gpointer mono_gc_thread_attach (THREAD_INFO_TYPE *info);
+
+void mono_gc_thread_detach_with_lock (THREAD_INFO_TYPE *info);
+
+gboolean mono_gc_thread_in_critical_region (THREAD_INFO_TYPE *info);
 
 /* If set, print debugging messages around finalizers. */
 extern gboolean log_finalizers;

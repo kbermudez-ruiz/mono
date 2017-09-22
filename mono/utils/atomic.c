@@ -1,6 +1,7 @@
-/*
- * atomic.c:  Workarounds for atomic operations for platforms that dont have
- *	      really atomic asm functions in atomic.h
+/**
+ * \file
+ * Workarounds for atomic operations for platforms that dont have
+ * really atomic asm functions in atomic.h
  *
  * Author:
  *	Dick Porter (dick@ximian.com)
@@ -12,6 +13,7 @@
 #include <glib.h>
 
 #include <mono/utils/atomic.h>
+#include <mono/utils/mono-compiler.h>
 
 #if defined (WAPI_NO_ATOMIC_ASM) || defined (BROKEN_64BIT_ATOMICS_INTRINSIC)
 
@@ -404,7 +406,7 @@ gpointer InterlockedReadPointer(volatile gpointer *src)
 	return(ret);
 }
 
-void InterlockedWrite(volatile gint8 *dst, gint8 val)
+void InterlockedWrite8(volatile gint8 *dst, gint8 val)
 {
 	int thr_ret;
 	
@@ -503,10 +505,56 @@ InterlockedCompareExchange64(volatile gint64 *dest, gint64 exch, gint64 comp)
 	return __sync_val_compare_and_swap (dest, comp, exch);
 }
 
-#elif defined (HAVE_64BIT_CMPXCHG_FALLBACK)
+#elif defined (__arm__) && defined (HAVE_ARMV7) && (defined(TARGET_IOS) || defined(TARGET_WATCHOS) || defined(TARGET_ANDROID))
 
-#ifdef ENABLE_EXTENSION_MODULE
-#include "../../../mono-extensions/mono/utils/atomic.c"
+#if defined (TARGET_IOS) || defined (TARGET_WATCHOS)
+
+#ifndef __clang__
+#error "Not supported."
+#endif
+
+gint64
+InterlockedCompareExchange64(volatile gint64 *dest, gint64 exch, gint64 comp)
+{
+	return  __sync_val_compare_and_swap (dest, comp, exch);
+}
+
+#elif defined (TARGET_ANDROID)
+
+/* Some Android systems can't find the 64-bit CAS intrinsic at runtime,
+ * so we have to roll our own...
+ */
+
+gint64 InterlockedCompareExchange64(volatile gint64 *dest, gint64 exch, gint64 comp) __attribute__ ((__naked__));
+
+gint64
+InterlockedCompareExchange64(volatile gint64 *dest, gint64 exch, gint64 comp)
+{
+	__asm__ (
+		"push		{r4, r5, r6, r7}\n"
+		"ldrd		r4, [sp, #16]\n"
+		"dmb		sy\n"
+	"1:\n"
+		"ldrexd		r6, [r0]\n"
+		"cmp		r7, r5\n"
+		"cmpeq		r6, r4\n"
+		"bne		2f\n"
+		"strexd		r1, r2, [r0]\n"
+		"cmp		r1, #0\n"
+		"bne		1b\n"
+	"2:\n"
+		"dmb		sy\n"
+		"mov		r0, r6\n"
+		"mov		r1, r7\n"
+		"pop		{r4, r5, r6, r7}\n"
+		"bx			lr\n"
+	);
+}
+
+#else
+
+#error "Need a 64-bit CAS fallback!"
+
 #endif
 
 #else
@@ -536,5 +584,8 @@ InterlockedCompareExchange64(volatile gint64 *dest, gint64 exch, gint64 comp)
 }
 
 #endif
+#endif
 
+#if !defined (WAPI_NO_ATOMIC_ASM) && !defined (BROKEN_64BIT_ATOMICS_INTRINSIC) && !defined (NEED_64BIT_CMPXCHG_FALLBACK)
+MONO_EMPTY_SOURCE_FILE (atomic);
 #endif

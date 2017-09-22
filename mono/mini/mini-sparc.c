@@ -1,5 +1,6 @@
-/*
- * mini-sparc.c: Sparc backend for the Mono code generator
+/**
+ * \file
+ * Sparc backend for the Mono code generator
  *
  * Authors:
  *   Paolo Molaro (lupus@ximian.com)
@@ -28,7 +29,8 @@
 #include <mono/metadata/debug-helpers.h>
 #include <mono/metadata/tokentype.h>
 #include <mono/utils/mono-math.h>
-#include <mono/utils/mono-hwcap-sparc.h>
+#include <mono/utils/mono-hwcap.h>
+#include <mono/utils/unlocked.h>
 
 #include "mini-sparc.h"
 #include "trace.h"
@@ -215,6 +217,12 @@ mono_arch_init (void)
 void
 mono_arch_cleanup (void)
 {
+}
+
+gboolean
+mono_arch_have_fast_tls (void)
+{
+	return FALSE;
 }
 
 /*
@@ -1330,7 +1338,7 @@ mono_arch_emit_outarg_vt (MonoCompile *cfg, MonoInst *ins, MonoInst *src)
 	ArgInfo *ainfo = (ArgInfo*)ins->inst_p1;
 	int size = ins->backend.size;
 
-	mini_emit_memcpy (cfg, sparc_sp, ainfo->offset, src->dreg, 0, size, 0);
+	mini_emit_memcpy (cfg, sparc_sp, ainfo->offset, src->dreg, 0, size, SIZEOF_VOID_P);
 }
 
 void
@@ -1561,6 +1569,7 @@ else { \
 static guint32*
 emit_call (MonoCompile *cfg, guint32 *code, guint32 patch_type, gconstpointer data)
 {
+	MonoError error;
 	gpointer target;
 
 	/* FIXME: This only works if the target method is already compiled */
@@ -1570,7 +1579,8 @@ emit_call (MonoCompile *cfg, guint32 *code, guint32 patch_type, gconstpointer da
 		patch_info.type = patch_type;
 		patch_info.data.target = data;
 
-		target = mono_resolve_patch_target (cfg->method, cfg->domain, NULL, &patch_info, FALSE);
+		target = mono_resolve_patch_target (cfg->method, cfg->domain, NULL, &patch_info, FALSE, &error);
+		mono_error_raise_exception (&error); /* FIXME: don't raise here */
 
 		/* FIXME: Add optimizations if the target is close enough */
 		sparc_set (code, target, sparc_o7);
@@ -2254,8 +2264,8 @@ mono_sparc_is_virtual_call (guint32 *code)
  * LOCKING: called with the domain lock held
  */
 gpointer
-mono_arch_build_imt_thunk (MonoVTable *vtable, MonoDomain *domain, MonoIMTCheckItem **imt_entries, int count,
-	gpointer fail_tramp)
+mono_arch_build_imt_trampoline (MonoVTable *vtable, MonoDomain *domain, MonoIMTCheckItem **imt_entries, int count,
+								gpointer fail_tramp)
 {
 	int i;
 	int size = 0;
@@ -2283,7 +2293,7 @@ mono_arch_build_imt_thunk (MonoVTable *vtable, MonoDomain *domain, MonoIMTCheckI
 		size += item->chunk_size;
 	}
 	if (fail_tramp)
-		code = mono_method_alloc_generic_virtual_thunk (domain, size * 4);
+		code = mono_method_alloc_generic_virtual_trampoline (domain, size * 4);
 	else
 		code = mono_domain_code_reserve (domain, size * 4);
 	start = code;
@@ -2350,7 +2360,7 @@ mono_arch_build_imt_thunk (MonoVTable *vtable, MonoDomain *domain, MonoIMTCheckI
 
 	mono_arch_flush_icache ((guint8*)start, (code - start) * 4);
 
-	mono_stats.imt_thunks_size += (code - start) * 4;
+	UnlockedAdd (&mono_stats.imt_trampolines_size, (code - start) * 4);
 	g_assert (code - start <= size);
 
 	mono_tramp_info_register (mono_tramp_info_create (NULL, start, code - start, NULL, NULL), domain);
@@ -2397,10 +2407,6 @@ mono_arch_output_basic_block (MonoCompile *cfg, MonoBasicBlock *bb)
 		g_print ("Basic block %d starting at offset 0x%x\n", bb->block_num, bb->native_offset);
 
 	cpos = bb->max_offset;
-
-	if (cfg->prof_options & MONO_PROFILE_COVERAGE) {
-		NOT_IMPLEMENTED;
-	}
 
 	MONO_BB_FOR_EACH_INS (bb, ins) {
 		guint8* code_start;
@@ -3624,7 +3630,7 @@ mono_arch_output_basic_block (MonoCompile *cfg, MonoBasicBlock *bb)
 			sparc_srl_imm (code, sparc_o7, 4, sparc_o7);
 			sparc_and_imm (code, FALSE, sparc_o7, 2047, sparc_o7);
 			sparc_cmp_imm (code, sparc_o7, 2047);
-			EMIT_COND_SYSTEM_EXCEPTION (ins, sparc_be, "ArithmeticException");
+			EMIT_COND_SYSTEM_EXCEPTION (ins, sparc_be, "OverflowException");
 #ifdef SPARCV9
 			sparc_fmovd (code, ins->sreg1, ins->dreg);
 #else
@@ -3670,16 +3676,19 @@ mono_arch_register_lowlevel_calls (void)
 }
 
 void
-mono_arch_patch_code (MonoCompile *cfg, MonoMethod *method, MonoDomain *domain, guint8 *code, MonoJumpInfo *ji, gboolean run_cctors)
+mono_arch_patch_code (MonoCompile *cfg, MonoMethod *method, MonoDomain *domain, guint8 *code, MonoJumpInfo *ji, gboolean run_cctors, MonoError *error)
 {
 	MonoJumpInfo *patch_info;
+
+	error_init (error);
 
 	/* FIXME: Move part of this to arch independent code */
 	for (patch_info = ji; patch_info; patch_info = patch_info->next) {
 		unsigned char *ip = patch_info->ip.i + code;
 		gpointer target;
 
-		target = mono_resolve_patch_target (method, domain, code, patch_info, run_cctors);
+		target = mono_resolve_patch_target (method, domain, code, patch_info, run_cctors, error);
+		return_if_nok (error);
 
 		switch (patch_info->type) {
 		case MONO_PATCH_INFO_NONE:
@@ -4093,9 +4102,6 @@ mono_arch_emit_epilog (MonoCompile *cfg)
 	if (mono_jit_trace_calls != NULL)
 		max_epilog_size += 50;
 
-	if (cfg->prof_options & MONO_PROFILE_ENTER_LEAVE)
-		max_epilog_size += 50;
-
 	while (cfg->code_len + max_epilog_size > (cfg->code_size - 16)) {
 		cfg->code_size *= 2;
 		cfg->native_code = g_realloc (cfg->native_code, cfg->code_size);
@@ -4204,8 +4210,7 @@ mono_arch_emit_exceptions (MonoCompile *cfg)
 
 			sparc_patch ((guint32*)(cfg->native_code + patch_info->ip.i), code);
 
-			exc_class = mono_class_from_name (mono_defaults.corlib, "System", patch_info->data.name);
-			g_assert (exc_class);
+			exc_class = mono_class_load_from_name (mono_defaults.corlib, "System", patch_info->data.name);
 			type_idx = exc_class->type_token - MONO_TOKEN_TYPE_DEF;
 			throw_ip = patch_info->ip.i;
 
@@ -4406,12 +4411,6 @@ mono_arch_get_argument_info (MonoMethodSignature *csig, int param_count, MonoJit
 
 	g_free (cinfo);
 
-	return 0;
-}
-
-gboolean
-mono_arch_print_tree (MonoInst *tree, int arity)
-{
 	return 0;
 }
 

@@ -1,11 +1,13 @@
-/*
- * opcodes.c: CIL instruction information
+/**
+ * \file
+ * CIL instruction information
  *
  * Author:
  *   Paolo Molaro (lupus@ximian.com)
  *
  * Copyright 2002-2003 Ximian, Inc (http://www.ximian.com)
  * Copyright 2004-2009 Novell, Inc (http://www.novell.com)
+ * Licensed under the MIT license. See LICENSE file in the project root for full license information.
  */
 #include <mono/metadata/opcodes.h>
 #include <stddef.h> /* for NULL */
@@ -43,6 +45,9 @@ static const int16_t opidx [] = {
 #undef OPDEF
 };
 
+/**
+ * mono_opcode_name:
+ */
 const char*
 mono_opcode_name (int opcode)
 {

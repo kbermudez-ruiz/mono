@@ -1,20 +1,10 @@
-/*
- * gc-internal-agnostic.h: Mono-agnostic GC interface.
+/**
+ * \file
+ * Mono-agnostic GC interface.
  *
  * Copyright (C) 2015 Xamarin Inc
  *
- * This library is free software; you can redistribute it and/or
- * modify it under the terms of the GNU Library General Public
- * License 2.0 as published by the Free Software Foundation;
- *
- * This library is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * Library General Public License for more details.
- *
- * You should have received a copy of the GNU Library General Public
- * License 2.0 along with this library; if not, write to the Free
- * Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Licensed under the MIT license. See LICENSE file in the project root for full license information.
  */
 
 #ifndef __MONO_METADATA_GCINTERNALAGNOSTIC_H__
@@ -73,11 +63,11 @@ typedef enum {
 #define MONO_GC_HANDLE(slot, type) (((slot) << MONO_GC_HANDLE_TYPE_SHIFT) | (((type) & MONO_GC_HANDLE_TYPE_MASK) + 1))
 
 typedef struct {
-	guint minor_gc_count;
-	guint major_gc_count;
-	guint64 minor_gc_time;
-	guint64 major_gc_time;
-	guint64 major_gc_time_concurrent;
+	gint32 minor_gc_count;
+	gint32 major_gc_count;
+	gint64 minor_gc_time;
+	gint64 major_gc_time;
+	gint64 major_gc_time_concurrent;
 } GCStats;
 
 extern GCStats gc_stats;
@@ -90,12 +80,6 @@ typedef void* MonoGCDescriptor;
 #define MONO_GC_DESCRIPTOR_NULL NULL
 #endif
 
-/*
- * Try to register a foreign thread with the GC, if we fail or the backend
- * can't cope with this concept - we return FALSE.
- */
-extern gboolean mono_gc_register_thread (void *baseptr);
-
 gboolean mono_gc_parse_environment_string_extract_number (const char *str, size_t *out);
 
 MonoGCDescriptor mono_gc_make_descr_for_object (gsize *bitmap, int numbits, size_t obj_size);
@@ -103,6 +87,9 @@ MonoGCDescriptor mono_gc_make_descr_for_array (int vector, gsize *elem_bitmap, i
 
 /* simple interface for data structures needed in the runtime */
 MonoGCDescriptor mono_gc_make_descr_from_bitmap (gsize *bitmap, int numbits);
+
+/* Return a root descriptor for a vector with repeating refs bitmap */
+MonoGCDescriptor mono_gc_make_vector_descr (void);
 
 /* Return a root descriptor for a root with all refs */
 MonoGCDescriptor mono_gc_make_root_descr_all_refs (int numbits);
@@ -120,5 +107,10 @@ void mono_gc_memmove_atomic (void *dest, const void *src, size_t size);
 void mono_gc_memmove_aligned (void *dest, const void *src, size_t size);
 
 FILE *mono_gc_get_logfile (void);
+
+/* equivalent to options set via MONO_GC_PARAMS */
+void mono_gc_params_set (const char* options);
+/* equivalent to options set via MONO_GC_DEBUG */
+void mono_gc_debug_set (const char* options);
 
 #endif

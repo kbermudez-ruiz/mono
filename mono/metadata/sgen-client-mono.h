@@ -1,20 +1,10 @@
-/*
- * sgen-client-mono.h: Mono's client definitions for SGen.
+/**
+ * \file
+ * Mono's client definitions for SGen.
  *
  * Copyright (C) 2014 Xamarin Inc
  *
- * This library is free software; you can redistribute it and/or
- * modify it under the terms of the GNU Library General Public
- * License 2.0 as published by the Free Software Foundation;
- *
- * This library is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * Library General Public License for more details.
- *
- * You should have received a copy of the GNU Library General Public
- * License 2.0 along with this library; if not, write to the Free
- * Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Licensed under the MIT license. See LICENSE file in the project root for full license information.
  */
 
 #ifdef SGEN_DEFINE_OBJECT_VTABLE
@@ -50,9 +40,6 @@ struct _SgenClientThreadInfo {
 	gboolean skip, suspend_done;
 	volatile int in_critical_region;
 
-	gpointer stopped_ip;	/* only valid if the thread is stopped */
-	MonoDomain *stopped_domain; /* dsto */
-
 	/*
 	This is set the argument of mono_gc_set_skip_thread.
 
@@ -75,12 +62,7 @@ struct _SgenClientThreadInfo {
 	void *stack_start;
 	void *stack_start_limit;
 
-	/*FIXME pretty please finish killing ARCH_NUM_REGS */
-#ifdef USE_MONO_CTX
 	MonoContext ctx;		/* ditto */
-#else
-	gpointer regs[ARCH_NUM_REGS];	    /* ditto */
-#endif
 };
 
 #else
@@ -100,6 +82,7 @@ extern void mono_sgen_init_stw (void);
 
 enum {
 	INTERNAL_MEM_EPHEMERON_LINK = INTERNAL_MEM_FIRST_CLIENT,
+	INTERNAL_MEM_MOVED_OBJECT,
 	INTERNAL_MEM_MAX
 };
 
@@ -130,7 +113,7 @@ sgen_mono_array_size (GCVTable vtable, MonoArray *array, mword *bounds_size, mwo
 #define SGEN_CLIENT_OBJECT_HEADER_SIZE		(sizeof (GCObject))
 #define SGEN_CLIENT_MINIMUM_OBJECT_SIZE		SGEN_CLIENT_OBJECT_HEADER_SIZE
 
-static mword /*__attribute__((noinline)) not sure if this hint is a good idea*/
+static mword /*__attribute__ ((__noinline__)) not sure if this hint is a good idea*/
 sgen_client_slow_object_get_size (GCVTable vtable, GCObject* o)
 {
 	MonoClass *klass = ((MonoVTable*)vtable)->klass;
@@ -215,7 +198,7 @@ sgen_client_update_copied_object (char *destination, GCVTable gc_vtable, void *o
 		SGEN_LOG (9, "Array instance %p: size: %lu, rank: %d, length: %lu", array, (unsigned long)objsize, vt->rank, (unsigned long)mono_array_length (array));
 	}
 
-	if (G_UNLIKELY (mono_profiler_events & MONO_PROFILE_GC_MOVES))
+	if (MONO_PROFILER_ENABLED (gc_moves))
 		mono_sgen_register_moved_object (obj, destination);
 }
 
@@ -310,13 +293,13 @@ sgen_client_binary_protocol_collection_begin (int minor_gc_count, int generation
 {
 	MONO_GC_BEGIN (generation);
 
-	mono_profiler_gc_event (MONO_GC_EVENT_START, generation);
+	MONO_PROFILER_RAISE (gc_event, (MONO_GC_EVENT_START, generation));
 
 #ifndef DISABLE_PERFCOUNTERS
 	if (generation == GENERATION_NURSERY)
-		mono_perfcounters->gc_collections0++;
+		InterlockedIncrement (&mono_perfcounters->gc_collections0);
 	else
-		mono_perfcounters->gc_collections1++;
+		InterlockedIncrement (&mono_perfcounters->gc_collections1);
 #endif
 }
 
@@ -325,7 +308,7 @@ sgen_client_binary_protocol_collection_end (int minor_gc_count, int generation, 
 {
 	MONO_GC_END (generation);
 
-	mono_profiler_gc_event (MONO_GC_EVENT_END, generation);
+	MONO_PROFILER_RAISE (gc_event, (MONO_GC_EVENT_END, generation));
 }
 
 static void G_GNUC_UNUSED
@@ -362,32 +345,24 @@ static void G_GNUC_UNUSED
 sgen_client_binary_protocol_world_stopping (int generation, long long timestamp, gpointer thread)
 {
 	MONO_GC_WORLD_STOP_BEGIN ();
-
-	mono_profiler_gc_event (MONO_GC_EVENT_PRE_STOP_WORLD, generation);
 }
 
 static void G_GNUC_UNUSED
 sgen_client_binary_protocol_world_stopped (int generation, long long timestamp, long long total_major_cards, long long marked_major_cards, long long total_los_cards, long long marked_los_cards)
 {
 	MONO_GC_WORLD_STOP_END ();
-
-	mono_profiler_gc_event (MONO_GC_EVENT_POST_STOP_WORLD, generation);
 }
 
 static void G_GNUC_UNUSED
 sgen_client_binary_protocol_world_restarting (int generation, long long timestamp, long long total_major_cards, long long marked_major_cards, long long total_los_cards, long long marked_los_cards)
 {
 	MONO_GC_WORLD_RESTART_BEGIN (generation);
-
-	mono_profiler_gc_event (MONO_GC_EVENT_PRE_START_WORLD, generation);
 }
 
 static void G_GNUC_UNUSED
 sgen_client_binary_protocol_world_restarted (int generation, long long timestamp)
 {
 	MONO_GC_WORLD_RESTART_END (generation);
-
-	mono_profiler_gc_event (MONO_GC_EVENT_POST_START_WORLD, generation);
 }
 
 static void G_GNUC_UNUSED
@@ -408,25 +383,21 @@ sgen_client_binary_protocol_block_set_state (gpointer addr, size_t size, int old
 static void G_GNUC_UNUSED
 sgen_client_binary_protocol_mark_start (int generation)
 {
-	mono_profiler_gc_event (MONO_GC_EVENT_MARK_START, generation);
 }
 
 static void G_GNUC_UNUSED
 sgen_client_binary_protocol_mark_end (int generation)
 {
-	mono_profiler_gc_event (MONO_GC_EVENT_MARK_END, generation);
 }
 
 static void G_GNUC_UNUSED
 sgen_client_binary_protocol_reclaim_start (int generation)
 {
-	mono_profiler_gc_event (MONO_GC_EVENT_RECLAIM_START, generation);
 }
 
 static void G_GNUC_UNUSED
 sgen_client_binary_protocol_reclaim_end (int generation)
 {
-	mono_profiler_gc_event (MONO_GC_EVENT_RECLAIM_END, generation);
 }
 
 static void
@@ -700,26 +671,33 @@ sgen_client_binary_protocol_evacuating_blocks (size_t block_size)
 {
 }
 
-int sgen_thread_handshake (BOOL suspend);
-gboolean sgen_suspend_thread (SgenThreadInfo *info);
-gboolean sgen_resume_thread (SgenThreadInfo *info);
-void sgen_wait_for_suspend_ack (int count);
+static void G_GNUC_UNUSED
+sgen_client_binary_protocol_concurrent_sweep_end (long long timestamp)
+{
+}
 
-#ifdef HAVE_KW_THREAD
-extern __thread SgenThreadInfo *sgen_thread_info;
-#define TLAB_ACCESS_INIT
-#define IN_CRITICAL_REGION sgen_thread_info->client_info.in_critical_region
-#else
-extern MonoNativeTlsKey thread_info_key;
-#define TLAB_ACCESS_INIT	SgenThreadInfo *__thread_info__ = mono_native_tls_get_value (thread_info_key)
-#define IN_CRITICAL_REGION (__thread_info__->client_info.in_critical_region)
-#endif
+static void G_GNUC_UNUSED
+sgen_client_binary_protocol_header (long long check, int version, int ptr_size, gboolean little_endian)
+{
+}
 
-#ifdef HAVE_KW_THREAD
-#define IN_CRITICAL_REGION sgen_thread_info->client_info.in_critical_region
-#else
+static void G_GNUC_UNUSED
+sgen_client_binary_protocol_pin_stats (int objects_pinned_in_nursery, size_t bytes_pinned_in_nursery, int objects_pinned_in_major, size_t bytes_pinned_in_major)
+{
+}
+
+static void G_GNUC_UNUSED
+sgen_client_binary_protocol_worker_finish_stats (int worker_index, int generation, gboolean forced, long long major_scan, long long los_scan, long long work_time)
+{
+}
+
+static void G_GNUC_UNUSED
+sgen_client_binary_protocol_collection_end_stats (long long major_scan, long long los_scan, long long finish_stack)
+{
+}
+
+#define TLAB_ACCESS_INIT	SgenThreadInfo *__thread_info__ = (SgenThreadInfo*)mono_tls_get_sgen_thread_info ()
 #define IN_CRITICAL_REGION (__thread_info__->client_info.in_critical_region)
-#endif
 
 /* Enter must be visible before anything is done in the critical region. */
 #define ENTER_CRITICAL_REGION do { mono_atomic_store_acquire (&IN_CRITICAL_REGION, 1); } while (0)
@@ -729,9 +707,22 @@ extern MonoNativeTlsKey thread_info_key;
  */
 #define EXIT_CRITICAL_REGION  do { mono_atomic_store_release (&IN_CRITICAL_REGION, 0); } while (0)
 
+#ifndef DISABLE_CRITICAL_REGION
+/*
+ * We can only use a critical region in the managed allocator if the JIT supports OP_ATOMIC_STORE_I4.
+ *
+ * TODO: Query the JIT instead of this ifdef hack.
+ */
+#if defined (TARGET_X86) || defined (TARGET_AMD64) || (defined (TARGET_ARM) && defined (HAVE_ARMV7)) || defined (TARGET_ARM64)
+#define MANAGED_ALLOCATOR_CAN_USE_CRITICAL_REGION
+#endif
+#endif
+
 #define SGEN_TV_DECLARE(name) gint64 name
 #define SGEN_TV_GETTIME(tv) tv = mono_100ns_ticks ()
-#define SGEN_TV_ELAPSED(start,end) ((long)(end-start))
+#define SGEN_TV_ELAPSED(start,end) ((gint64)(end-start))
+
+guint64 mono_time_since_last_stw (void);
 
 typedef MonoSemType SgenSemaphore;
 

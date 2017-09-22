@@ -28,19 +28,11 @@
 #if MONO_SECURITY_ALIAS
 extern alias MonoSecurity;
 #endif
-#if MONO_X509_ALIAS
-extern alias PrebuiltSystem;
-#endif
 
 #if MONO_SECURITY_ALIAS
 using MonoSecurity::Mono.Security.Interface;
 #else
 using Mono.Security.Interface;
-#endif
-#if MONO_X509_ALIAS
-using XX509CertificateCollection = PrebuiltSystem::System.Security.Cryptography.X509Certificates.X509CertificateCollection;
-#else
-using XX509CertificateCollection = System.Security.Cryptography.X509Certificates.X509CertificateCollection;
 #endif
 #endif
 
@@ -49,6 +41,7 @@ using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using System.Net.Security;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Security.Authentication;
 using System.Security.Cryptography.X509Certificates;
@@ -59,20 +52,27 @@ namespace Mono.Net.Security
 {
 	class MonoTlsStream
 	{
-		readonly IMonoTlsProvider provider;
+#if SECURITY_DEP		
+		readonly MonoTlsProvider provider;
+		readonly NetworkStream networkStream;		
 		readonly HttpWebRequest request;
-		readonly NetworkStream networkStream;
 
-		IMonoSslStream sslStream;
-		WebExceptionStatus status;
+		readonly MonoTlsSettings settings;
 
 		internal HttpWebRequest Request {
 			get { return request; }
 		}
 
+		IMonoSslStream sslStream;
+
 		internal IMonoSslStream SslStream {
 			get { return sslStream; }
 		}
+#else
+		const string EXCEPTION_MESSAGE = "System.Net.Security.SslStream is not supported on the current platform.";
+#endif
+
+		WebExceptionStatus status;
 
 		internal WebExceptionStatus ExceptionStatus {
 			get { return status; }
@@ -82,12 +82,9 @@ namespace Mono.Net.Security
 			get; set;
 		}
 
-#if SECURITY_DEP
-		readonly ChainValidationHelper validationHelper;
-		readonly MonoTlsSettings settings;
-
 		public MonoTlsStream (HttpWebRequest request, NetworkStream networkStream)
 		{
+#if SECURITY_DEP
 			this.request = request;
 			this.networkStream = networkStream;
 
@@ -95,27 +92,45 @@ namespace Mono.Net.Security
 			provider = request.TlsProvider ?? MonoTlsProviderFactory.GetProviderInternal ();
 			status = WebExceptionStatus.SecureChannelFailure;
 
-			validationHelper = ChainValidationHelper.Create (provider.Provider, ref settings, this);
+			ChainValidationHelper.Create (provider, ref settings, this);
+#else
+			status = WebExceptionStatus.SecureChannelFailure;
+			throw new PlatformNotSupportedException (EXCEPTION_MESSAGE);
+#endif
 		}
 
 		internal Stream CreateStream (byte[] buffer)
 		{
+#if SECURITY_DEP
 			sslStream = provider.CreateSslStream (networkStream, false, settings);
 
 			try {
+				var host = request.Host;
+				if (!string.IsNullOrEmpty (host)) {
+					var pos = host.IndexOf (':');
+					if (pos > 0)
+						host = host.Substring (0, pos);
+				}
+
 				sslStream.AuthenticateAsClient (
-					request.Address.Host, (XX509CertificateCollection)(object)request.ClientCertificates,
+					host, request.ClientCertificates,
 					(SslProtocols)ServicePointManager.SecurityProtocol,
 					ServicePointManager.CheckCertificateRevocationList);
 
 				status = WebExceptionStatus.Success;
+			} catch {
+				status = WebExceptionStatus.SecureChannelFailure;
+				throw;
 			} finally {
 				if (CertificateValidationFailed)
 					status = WebExceptionStatus.TrustFailure;
 
-				request.ServicePoint.SetClientCertificate (sslStream.InternalLocalCertificate);
-				if (status != WebExceptionStatus.Success)
+				if (status == WebExceptionStatus.Success)
+					request.ServicePoint.UpdateClientCertificate (sslStream.InternalLocalCertificate);
+				else {
+					request.ServicePoint.UpdateClientCertificate (null);
 					sslStream = null;
+				}
 			}
 
 			try {
@@ -128,7 +143,9 @@ namespace Mono.Net.Security
 			}
 
 			return sslStream.AuthenticatedStream;
-		}
+#else
+			throw new PlatformNotSupportedException (EXCEPTION_MESSAGE);
 #endif
+		}
 	}
 }

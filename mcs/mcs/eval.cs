@@ -958,6 +958,12 @@ namespace Mono.CSharp
 				importer.ImportAssembly (a, module.GlobalRootNamespace);
 			}
 		}
+
+		public void ImportTypes (bool importExtensionTypes, params Type[] types) {
+#if !STATIC
+			importer.ImportTypes (types, module.GlobalRootNamespace, importExtensionTypes);
+#endif
+		}
 	}
 
 	
@@ -1134,7 +1140,7 @@ namespace Mono.CSharp
 			QuitRequested = true;
 		}
 
-#if !NET_2_1
+#if !MOBILE
 		/// <summary>
 		///   Describes an object or a type.
 		/// </summary>

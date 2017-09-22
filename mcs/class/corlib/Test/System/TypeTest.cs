@@ -16,7 +16,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
-#if !MONOTOUCH && !MOBILE_STATIC
+#if !MONOTOUCH && !FULL_AOT_RUNTIME
 using System.Reflection.Emit;
 #endif
 using System.Runtime.InteropServices;
@@ -261,18 +261,19 @@ namespace MonoTests.System
 	[TestFixture]
 	public class TypeTest
 	{
-#if !MONOTOUCH && !MOBILE_STATIC
+#if !MONOTOUCH && !FULL_AOT_RUNTIME
 		private ModuleBuilder module;
 #endif
 		const string ASSEMBLY_NAME = "MonoTests.System.TypeTest";
 		static int typeIndexer = 0;
+		static bool isMono = Type.GetType ("Mono.Runtime", false) != null;
 
 		[SetUp]
 		public void SetUp ()
 		{
 			AssemblyName assemblyName = new AssemblyName ();
 			assemblyName.Name = ASSEMBLY_NAME;
-#if !MONOTOUCH && !MOBILE_STATIC
+#if !MONOTOUCH && !FULL_AOT_RUNTIME
 			var assembly = AppDomain.CurrentDomain.DefineDynamicAssembly (
 					assemblyName, AssemblyBuilderAccess.RunAndSave, Path.GetTempPath ());
 			module = assembly.DefineDynamicModule ("module1");
@@ -455,6 +456,65 @@ namespace MonoTests.System
 			}
 
 		}
+
+		class GetProperties_Overrides_Input
+		{
+			public class TestClass : BaseClass<object>
+			{
+				public override object TestProperty { get; set; }
+			}
+
+			public abstract class BaseClass<T>
+			{
+				public virtual T TestProperty { get; set; }
+			}
+
+			public class TestClass_Indexer : BaseClass_Indexer<object>
+			{
+				public override object this[int arg] { set { } }
+			}
+
+			public abstract class BaseClass_Indexer<T>
+			{
+				public virtual T this[int arg] { set { } }
+			}
+
+			public interface IB : IA<object>
+			{
+				new object TestProperty { get; set; }
+			}
+
+			public interface IA<T>
+			{
+				T TestProperty { get; set; }
+			}
+
+			public class TestClass_HiddenProperty : BaseClass_HiddenProperty
+			{
+				public new virtual string Prop { set { } }
+			}
+
+			public class BaseClass_HiddenProperty
+			{
+				public virtual string Prop { set  { } }
+			}
+		}
+
+		[Test]
+		public void GetProperties_Overrides ()
+		{
+			Assert.AreEqual (1, typeof (GetProperties_Overrides_Input.IB).GetProperties().Length);
+
+			var prop = typeof (GetProperties_Overrides_Input.TestClass).GetProperty ("TestProperty");
+			Assert.AreEqual (typeof (GetProperties_Overrides_Input.TestClass), prop.DeclaringType);
+
+			var prop_2 = typeof (GetProperties_Overrides_Input.TestClass_HiddenProperty).GetProperty ("Prop");
+			Assert.AreEqual (typeof (GetProperties_Overrides_Input.TestClass_HiddenProperty), prop_2.DeclaringType);
+
+			Assert.AreEqual (1, typeof (GetProperties_Overrides_Input.TestClass).GetProperties().Length);
+			Assert.AreEqual (1, typeof (GetProperties_Overrides_Input.TestClass_Indexer).GetProperties().Length);
+			Assert.AreEqual (1, typeof (GetProperties_Overrides_Input.TestClass_HiddenProperty).GetProperties().Length);
+	    }
 
 		[Test] // GetProperties (BindingFlags)
 		public void GetProperties_Flags ()
@@ -1775,8 +1835,8 @@ namespace MonoTests.System
 
 			Assert.AreEqual (t1.FullName, "System.__ComObject");
 
-			if (Environment.OSVersion.Platform == PlatformID.Win32Windows ||
-				Environment.OSVersion.Platform == PlatformID.Win32NT)
+			if (!isMono && (Environment.OSVersion.Platform == PlatformID.Win32Windows ||
+				Environment.OSVersion.Platform == PlatformID.Win32NT))
 				Activator.CreateInstance(t1);
 
 			Assert.AreEqual (t2.FullName, "System.__ComObject");
@@ -2201,11 +2261,14 @@ namespace MonoTests.System
 
 		[Test]
 		public void GetGenericMethodDefinitionOverInflatedMethodOnGTD () {
+			var s = new List<int> () { 1, 2, 3 }.ConvertAll ( i => i.ToString () );
+			Assert.AreEqual (3, s.Count);
 			var l = typeof (List<>);
 			var m = l.GetMethod ("ConvertAll");
 			var infl = m.MakeGenericMethod (typeof (int));
 			var res = m.GetGenericMethodDefinition ();
 			Assert.AreEqual (m, res, "#1");
+			Assert.AreEqual (1, infl.GetGenericArguments().Length, "#2");
 		}
 
 		[Test]
@@ -2998,9 +3061,23 @@ namespace MonoTests.System
 		public void MakeArrayTypeTest ()
 		{
 			// This should not crash:
-			typeof (void).MakeArrayType ();
+			Type t = typeof (void).MakeArrayType ();
 		}
 		
+		[Test]
+		[ExpectedException (typeof (InvalidProgramException))]
+		public void MakeArrayTypedReferenceInstanceTest ()
+		{
+			object o = Array.CreateInstance (typeof (global::System.TypedReference), 1);
+		}
+
+		[Test]
+		public void MakeArrayTypeLargeRank ()
+		{
+			Assert.Throws<TypeLoadException> (delegate () {
+					typeof (int).MakeArrayType (33);
+				});
+		}
 
 		[ComVisible (true)]
 		public class ComFoo<T> {
@@ -3091,7 +3168,7 @@ namespace MonoTests.System
 		}
 
 		[Test]
-#if MONOTOUCH || MOBILE_STATIC
+#if MONOTOUCH || FULL_AOT_RUNTIME
 		[ExpectedException (typeof (NotSupportedException))]
 #endif
 		public void MakeGenericType_UserDefinedType ()
@@ -3108,7 +3185,7 @@ namespace MonoTests.System
 		}
 
 		[Test]
-#if MONOTOUCH || MOBILE_STATIC
+#if MONOTOUCH || FULL_AOT_RUNTIME
 		[ExpectedException (typeof (NotSupportedException))]
 #endif
 		public void MakeGenericType_NestedUserDefinedType ()
@@ -3125,7 +3202,7 @@ namespace MonoTests.System
 		}
 		
 		[Test]
-#if MONOTOUCH || MOBILE_STATIC
+#if MONOTOUCH || FULL_AOT_RUNTIME
 		[ExpectedException (typeof (NotSupportedException))]
 #endif
 		public void TestMakeGenericType_UserDefinedType_DotNet20SP1 () 
@@ -3138,7 +3215,7 @@ namespace MonoTests.System
 		}
 		
 		[Test]
-#if MONOTOUCH || MOBILE_STATIC
+#if MONOTOUCH || FULL_AOT_RUNTIME
 		[ExpectedException (typeof (NotSupportedException))]
 #endif
 		public void MakeGenericType_BadUserType ()
@@ -3195,6 +3272,38 @@ namespace MonoTests.System
 			MethodInfo m = typeof (Type).GetMethod ("GetType",  BindingFlags.Public | BindingFlags.Static, null, new Type [] { typeof (string) },  null);
 			object r = m.Invoke (null, BindingFlags.Default, null, new object [] { "NoNamespaceClass" }, CultureInfo.InvariantCulture);
 			Assert.AreSame (expectedType, r, "#2");
+		}
+
+		public class BConstrained<Y> where Y : BConstrained<Y> {
+		}
+
+		public class AConstrained<X> : BConstrained<AConstrained<X>> {
+		}
+
+		[Test] // Bug https://bugzilla.xamarin.com/show_bug.cgi?id=54485
+		public void MakeGenericType_GTD_Constraint ()
+		{
+			// This is pretty weird, but match .NET behavior (note
+			// that typeof(BConstrained<AConstrained<>>) is a
+			// compile-time error with roslyn, but it's apparently
+			// an ok thing to make with reflection.
+			var tb = typeof (BConstrained<>);
+			var ta = typeof (AConstrained<>);
+			var result = tb.MakeGenericType (ta);
+			Assert.IsNotNull (result, "#1");
+			// lock down the answer to match what .NET makes
+			Assert.IsTrue (result.IsGenericType, "#2");
+			Assert.AreEqual (tb, result.GetGenericTypeDefinition (), "#3");
+			var bargs = result.GetGenericArguments ();
+			Assert.AreEqual (1, bargs.Length, "#4");
+			var arg = bargs [0];
+			Assert.IsTrue (arg.IsGenericType, "#5");
+			// N.B. evidently AConstrained`1 and AConstrained`1<!0> are the same type
+			Assert.IsTrue (arg.IsGenericTypeDefinition, "#6");
+			Assert.AreEqual (ta, arg.GetGenericTypeDefinition (), "#7");
+			var aargs = arg.GetGenericArguments ();
+			Assert.AreEqual (1, aargs.Length, "#8");
+			Assert.AreEqual (ta.GetGenericArguments () [0], aargs [0], "#9");
 		}
 
 	[Test]
@@ -3274,7 +3383,7 @@ namespace MonoTests.System
 			Assert.AreEqual (t1, t2);
 		}
 
-#if !MONOTOUCH && !MOBILE_STATIC
+#if !MONOTOUCH && !FULL_AOT_RUNTIME
 		[Test]
 		public void SpaceAfterComma () {
 			string strType = "System.Collections.Generic.Dictionary`2[[System.Int32,mscorlib], [System.String,mscorlib]],mscorlib";
@@ -3282,7 +3391,7 @@ namespace MonoTests.System
 		}
 #endif
 
-#if !MONOTOUCH && !MOBILE_STATIC
+#if !MONOTOUCH && !FULL_AOT_RUNTIME
 		[Test]
 		public void Bug506757 ()
 		{
@@ -4059,15 +4168,25 @@ namespace MonoTests.System
 			} catch (ArgumentNullException) {}
 		}
 
-		void MustAE (string tname) {
+		void MustAE_general (string tname, Func<string,Type> getType) {
 			try {
-				var res = Type.GetType (tname, name => {
-					return Assembly.Load (name);
-				},(asm,name,ignore) => {
-					return (object)asm == null ? Type.GetType (name, false, ignore) : asm.GetType (name, false, ignore);
-				}, true, false);
+				var res = getType (tname);
 				Assert.Fail (tname);
 			} catch (ArgumentException) {}
+		}
+
+		void MustAE (string typename) {
+			MustAE_general (typename, tname => {
+					return Type.GetType (tname, name => {
+							return Assembly.Load (name);
+						},(asm,name,ignore) => {
+							return (object)asm == null ? Type.GetType (name, false, ignore) : asm.GetType (name, false, ignore);
+						}, true, false);
+				});
+		}
+
+		void MustAEnn (string typename) {
+			MustAE_general (typename, tname => Type.GetType (tname, null, null));
 		}
 
 		void MustFNFE (string tname) {
@@ -4121,6 +4240,17 @@ namespace MonoTests.System
 			MustTLE (string.Format ("{0}ZZZZ,{1}", typeof (MyRealEnum).FullName, aqn));
 		}
 
+		[Test]
+		public void GetTypeExceptionMsg () {
+			string typeName = "system.int32, foo";
+			try {
+				Type.GetType(typeName, true, false);
+			} catch (TypeLoadException ex) {
+				Assert.IsTrue (ex.Message.Contains ("system.int32"));
+				Assert.IsTrue (ex.Message.Contains ("foo"));
+			}
+		}
+
 	   	delegate void MyAction<in T>(T ag);
 
 		[Test] //bug #668506
@@ -4152,7 +4282,57 @@ namespace MonoTests.System
 			Assert.AreEqual (Type.GetType ("MonoTests.System.Foo`1[System.Int32"), null, "#15");
 		}
 
-#if !MONOTOUCH && !MOBILE_STATIC
+		[Test]
+		public void GetTypeNullDelegatesParseGenericCorrectly () {
+			Assert.AreEqual (Type.GetType ("MonoTests.System.Foo`1", null, null), typeof (Foo<>), "#1");
+			Assert.AreEqual (Type.GetType ("MonoTests.System.Foo`1[System.Int32]", null, null), typeof (Foo<int>), "#2");
+			Assert.AreEqual (Type.GetType ("MonoTests.System.Foo`1[[System.Int32]]", null, null), typeof (Foo<int>), "#3");
+			Assert.AreEqual (Type.GetType ("MonoTests.System.Foo`1[System.Int32][]", null, null), typeof (Foo<int>[]), "#4");
+			Assert.AreEqual (Type.GetType ("MonoTests.System.Foo`1[System.Int32][,]", null, null), typeof (Foo<int>[,]), "#5");
+			Assert.AreEqual (Type.GetType ("MonoTests.System.Foo`1[]", null, null), typeof (Foo<>).MakeArrayType(), "#6");
+			Assert.AreEqual (Type.GetType ("MonoTests.System.Foo`1[,]", null, null), typeof (Foo<>).MakeArrayType (2), "#7");
+			Assert.AreEqual (Type.GetType ("MonoTests.System.Foo`1[][]", null, null), typeof (Foo<>).MakeArrayType ().MakeArrayType (), "#8");
+
+			MustAEnn ("MonoTests.System.Foo`1[][System.Int32]");
+			MustAEnn ("MonoTests.System.Foo`1[");
+			MustAEnn ("MonoTests.System.Foo`1[[");
+			MustAEnn ("MonoTests.System.Foo`1[[]");
+			MustAEnn ("MonoTests.System.Foo`1[,");
+			MustAEnn ("MonoTests.System.Foo`1[*");
+			MustAEnn ("MonoTests.System.Foo`1[System.Int32");
+		}
+
+		Dictionary<int, T> MakeDictHelper<T> (T[] arr) {
+			return new Dictionary<int, T>();
+		}
+
+		[Test]
+		public void GetTypeAnonymousParseCorrectly () {
+			var x = new { X = 1 };
+			var a = new [] { x };
+			var d = MakeDictHelper (a);
+
+			var x_type = x.GetType ();
+			var a_type = a.GetType ();
+			var d_type = d.GetType ();
+
+			Assert.AreEqual (Type.GetType (x_type.ToString ()), x_type, "#1");
+			Assert.AreEqual (Type.GetType (x_type.ToString (), null, null), x_type, "#2");
+			Assert.AreEqual (Type.GetType (a_type.ToString ()), a_type, "#3");
+			Assert.AreEqual (Type.GetType (a_type.ToString (), null, null), a_type, "#4");
+			Assert.AreEqual (Type.GetType (d_type.ToString ()), d_type, "#5");
+			Assert.AreEqual (Type.GetType (d_type.ToString (), null, null), d_type, "#6");
+
+			Assert.AreEqual (Type.GetType (x_type.FullName), x_type, "#7");
+			Assert.AreEqual (Type.GetType (x_type.FullName, null, null), x_type, "#8");
+			Assert.AreEqual (Type.GetType (a_type.FullName), a_type, "#9");
+			Assert.AreEqual (Type.GetType (a_type.FullName, null, null), a_type, "#10");
+			Assert.AreEqual (Type.GetType (d_type.FullName), d_type, "#11");
+			Assert.AreEqual (Type.GetType (d_type.FullName, null, null), d_type, "#12");
+
+		}
+
+#if !MONOTOUCH && !FULL_AOT_RUNTIME && !MONOMAC
 		[Test]
 		[Category ("AndroidNotWorking")] // requires symbol writer
 		public void FullNameGetTypeParseEscapeRoundtrip () // bug #26384
@@ -4160,7 +4340,7 @@ namespace MonoTests.System
 			var nm = new AssemblyName ("asm");
 			var ab = AssemblyBuilder.DefineDynamicAssembly (nm,
 									AssemblyBuilderAccess.Run);
-			var mb = ab.DefineDynamicModule("m", true);
+			var mb = ab.DefineDynamicModule("m", false);
 			var tb = mb.DefineType ("NameSpace,+*&[]\\.Type,+*&[]\\",
 						TypeAttributes.Class | TypeAttributes.Public);
 
@@ -4197,6 +4377,24 @@ namespace MonoTests.System
 
 		}
 #endif
+
+
+		[Test]
+		public void GetTypeBadArity()
+		{
+			// Regression test for #46250
+			try {
+				Type.GetType ("System.Collections.Generic.Dictionary`2[System.String]", true);
+				Assert.Fail ("Did not throw an exception (#1)");
+			} catch (ArgumentException) {
+			}
+
+			try {
+				Type.GetType ("System.Collections.Generic.Dictionary`2[System.String,System.Int32,System.Int64]", true);
+				Assert.Fail ("Did not throw an exception (#2)");
+			} catch (ArgumentException) {
+			}
+		}
 
 		public abstract class Stream : IDisposable
 		{

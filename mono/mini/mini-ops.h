@@ -1,7 +1,9 @@
-/*
+/**
+ * \file
  * Copyright 2003 Ximian, Inc
  * Copyright 2003-2011 Novell Inc
  * Copyright 2011 Xamarin Inc
+ * Licensed under the MIT license. See LICENSE file in the project root for full license information.
  */
 MINI_OP(OP_LOAD,	"load", NONE, NONE, NONE)
 MINI_OP(OP_LDADDR,	"ldaddr", IREG, NONE, NONE)
@@ -41,6 +43,7 @@ MINI_OP(OP_SEQ_POINT, "seq_point", NONE, NONE, NONE)
 MINI_OP(OP_IL_SEQ_POINT, "il_seq_point", NONE, NONE, NONE)
 MINI_OP(OP_IMPLICIT_EXCEPTION, "implicit_exception", NONE, NONE, NONE)
 
+/* CALL opcodes need to stay together, see MONO_IS_CALL macro */
 MINI_OP(OP_VOIDCALL,	"voidcall", NONE, NONE, NONE)
 MINI_OP(OP_VOIDCALL_REG,	"voidcall_reg", NONE, IREG, NONE)
 MINI_OP(OP_VOIDCALL_MEMBASE,	"voidcall_membase", NONE, IREG, NONE)
@@ -704,6 +707,9 @@ MINI_OP(OP_STRLEN, "strlen", IREG, IREG, NONE)
 MINI_OP(OP_NEWARR, "newarr", IREG, IREG, NONE)
 MINI_OP(OP_LDLEN, "ldlen", IREG, IREG, NONE)
 MINI_OP(OP_BOUNDS_CHECK, "bounds_check", NONE, IREG, IREG)
+/* type checks */
+MINI_OP(OP_ISINST, "isinst", IREG, IREG, NONE)
+MINI_OP(OP_CASTCLASS, "castclass", IREG, IREG, NONE)
 /* get adress of element in a 2D array */
 MINI_OP(OP_LDELEMA2D, "getldelema2", NONE, NONE, NONE)
 /* inlined small memcpy with constant length */
@@ -859,6 +865,7 @@ MINI_OP(OP_PSUBW_SAT_UN, "psubw_sat_un", XREG, XREG, XREG)
 
 MINI_OP(OP_PMULW, "pmulw", XREG, XREG, XREG)
 MINI_OP(OP_PMULD, "pmuld", XREG, XREG, XREG)
+/* Multiplies two 32 bit numbers into a 64 bit one */
 MINI_OP(OP_PMULQ, "pmulq", XREG, XREG, XREG)
 
 MINI_OP(OP_PMULW_HIGH_UN, "pmul_high_un", XREG, XREG, XREG)
@@ -942,10 +949,15 @@ MINI_OP(OP_CVTPS2PD, "cvtps2pd", XREG, XREG, NONE)
 MINI_OP(OP_CVTTPD2DQ, "cvttpd2dq", XREG, XREG, NONE)
 MINI_OP(OP_CVTTPS2DQ, "cvttps2dq", XREG, XREG, NONE)
 
+/* r4 dot product */
+/* multiply all 4 single precision float elements, add them together, and store the result to the lowest element */
+MINI_OP(OP_DPPS, "dpps", XREG, XREG, XREG)
+
 #endif
 
 MINI_OP(OP_XMOVE,   "xmove", XREG, XREG, NONE)
 MINI_OP(OP_XZERO,   "xzero", XREG, NONE, NONE)
+MINI_OP(OP_XONES,   "xones", XREG, NONE, NONE)
 MINI_OP(OP_XPHI,	"xphi", XREG, NONE, NONE)
 
 /*
@@ -1207,107 +1219,14 @@ MINI_OP(OP_S390_IADD_OVF,       "s390_int_add_ovf", IREG, IREG, IREG)
 MINI_OP(OP_S390_IADD_OVF_UN,    "s390_int_add_ovf_un", IREG, IREG, IREG)
 MINI_OP(OP_S390_ISUB_OVF,       "s390_int_sub_ovf", IREG, IREG, IREG)
 MINI_OP(OP_S390_ISUB_OVF_UN,    "s390_int_sub_ovf_un", IREG, IREG, IREG)
-#endif
-
-#if defined(__ia64__)
-MINI_OP(OP_ATOMIC_ADD_IMM_I4, "atomic_add_imm_i4", IREG, IREG, NONE)
-MINI_OP(OP_ATOMIC_ADD_IMM_I8, "atomic_add_imm_i8", IREG, IREG, NONE)
-
-MINI_OP(OP_IA64_LOAD,          "ia64_load", NONE, NONE, NONE)
-MINI_OP(OP_IA64_LOADI1,        "ia64_loadi1", NONE, NONE, NONE)
-MINI_OP(OP_IA64_LOADU1,        "ia64_loadu1", NONE, NONE, NONE)
-MINI_OP(OP_IA64_LOADI2,        "ia64_loadi2", NONE, NONE, NONE)
-MINI_OP(OP_IA64_LOADU2,        "ia64_loadu2", NONE, NONE, NONE)
-MINI_OP(OP_IA64_LOADI4,        "ia64_loadi4", NONE, NONE, NONE)
-MINI_OP(OP_IA64_LOADU4,        "ia64_loadu4", NONE, NONE, NONE)
-MINI_OP(OP_IA64_LOADI8,        "ia64_loadi8", NONE, NONE, NONE)
-MINI_OP(OP_IA64_LOADU8,        "ia64_loadu8", NONE, NONE, NONE)
-MINI_OP(OP_IA64_LOADR4,        "ia64_loadr4", NONE, NONE, NONE)
-MINI_OP(OP_IA64_LOADR8,        "ia64_loadr8", NONE, NONE, NONE)
-MINI_OP(OP_IA64_STORE,          "ia64_store", NONE, NONE, NONE)
-MINI_OP(OP_IA64_STOREI1,        "ia64_storei1", NONE, NONE, NONE)
-MINI_OP(OP_IA64_STOREU1,        "ia64_storeu1", NONE, NONE, NONE)
-MINI_OP(OP_IA64_STOREI2,        "ia64_storei2", NONE, NONE, NONE)
-MINI_OP(OP_IA64_STOREU2,        "ia64_storeu2", NONE, NONE, NONE)
-MINI_OP(OP_IA64_STOREI4,        "ia64_storei4", NONE, NONE, NONE)
-MINI_OP(OP_IA64_STOREU4,        "ia64_storeu4", NONE, NONE, NONE)
-MINI_OP(OP_IA64_STOREI8,        "ia64_storei8", NONE, NONE, NONE)
-MINI_OP(OP_IA64_STOREU8,        "ia64_storeu8", NONE, NONE, NONE)
-MINI_OP(OP_IA64_STORER4,        "ia64_storer4", NONE, NONE, NONE)
-MINI_OP(OP_IA64_STORER8,        "ia64_storer8", NONE, NONE, NONE)
-
-MINI_OP(OP_IA64_CMP4_EQ,        "ia64_cmp4_eq", NONE, IREG, IREG)
-MINI_OP(OP_IA64_CMP4_NE,        "ia64_cmp4_ne", NONE, IREG, IREG)
-MINI_OP(OP_IA64_CMP4_LE,        "ia64_cmp4_le", NONE, IREG, IREG)
-MINI_OP(OP_IA64_CMP4_LT,        "ia64_cmp4_lt", NONE, IREG, IREG)
-MINI_OP(OP_IA64_CMP4_GE,        "ia64_cmp4_ge", NONE, IREG, IREG)
-MINI_OP(OP_IA64_CMP4_GT,        "ia64_cmp4_gt", NONE, IREG, IREG)
-MINI_OP(OP_IA64_CMP4_LE_UN,     "ia64_cmp4_le_un", NONE, IREG, IREG)
-MINI_OP(OP_IA64_CMP4_LT_UN,     "ia64_cmp4_lt_un", NONE, IREG, IREG)
-MINI_OP(OP_IA64_CMP4_GE_UN,     "ia64_cmp4_ge_un", NONE, IREG, IREG)
-MINI_OP(OP_IA64_CMP4_GT_UN,     "ia64_cmp4_gt_un", NONE, IREG, IREG)
-MINI_OP(OP_IA64_CMP_EQ,         "ia64_cmp_eq", NONE, IREG, IREG)
-MINI_OP(OP_IA64_CMP_NE,         "ia64_cmp_ne", NONE, IREG, IREG)
-MINI_OP(OP_IA64_CMP_LE,         "ia64_cmp_le", NONE, IREG, IREG)
-MINI_OP(OP_IA64_CMP_LT,         "ia64_cmp_lt", NONE, IREG, IREG)
-MINI_OP(OP_IA64_CMP_GE,         "ia64_cmp_ge", NONE, IREG, IREG)
-MINI_OP(OP_IA64_CMP_GT,         "ia64_cmp_gt", NONE, IREG, IREG)
-MINI_OP(OP_IA64_CMP_LT_UN,      "ia64_cmp_lt_un", NONE, IREG, IREG)
-MINI_OP(OP_IA64_CMP_GT_UN,      "ia64_cmp_gt_un", NONE, IREG, IREG)
-MINI_OP(OP_IA64_CMP_GE_UN,      "ia64_cmp_ge_un", NONE, IREG, IREG)
-MINI_OP(OP_IA64_CMP_LE_UN,      "ia64_cmp_le_un", NONE, IREG, IREG)
-
-MINI_OP(OP_IA64_CMP4_EQ_IMM,        "ia64_cmp4_eq_imm", NONE, NONE, IREG)
-MINI_OP(OP_IA64_CMP4_NE_IMM,        "ia64_cmp4_ne_imm", NONE, NONE, IREG)
-MINI_OP(OP_IA64_CMP4_LE_IMM,        "ia64_cmp4_le_imm", NONE, NONE, IREG)
-MINI_OP(OP_IA64_CMP4_LT_IMM,        "ia64_cmp4_lt_imm", NONE, NONE, IREG)
-MINI_OP(OP_IA64_CMP4_GE_IMM,        "ia64_cmp4_ge_imm", NONE, NONE, IREG)
-MINI_OP(OP_IA64_CMP4_GT_IMM,        "ia64_cmp4_gt_imm", NONE, NONE, IREG)
-MINI_OP(OP_IA64_CMP4_LE_UN_IMM,     "ia64_cmp4_le_un_imm", NONE, NONE, IREG)
-MINI_OP(OP_IA64_CMP4_LT_UN_IMM,     "ia64_cmp4_lt_un_imm", NONE, NONE, IREG)
-MINI_OP(OP_IA64_CMP4_GE_UN_IMM,     "ia64_cmp4_ge_un_imm", NONE, NONE, IREG)
-MINI_OP(OP_IA64_CMP4_GT_UN_IMM,     "ia64_cmp4_gt_un_imm", NONE, NONE, IREG)
-MINI_OP(OP_IA64_CMP_EQ_IMM,         "ia64_cmp_eq_imm", NONE, NONE, IREG)
-MINI_OP(OP_IA64_CMP_NE_IMM,         "ia64_cmp_ne_imm", NONE, NONE, IREG)
-MINI_OP(OP_IA64_CMP_LE_IMM,         "ia64_cmp_le_imm", NONE, NONE, IREG)
-MINI_OP(OP_IA64_CMP_LT_IMM,         "ia64_cmp_lt_imm", NONE, NONE, IREG)
-MINI_OP(OP_IA64_CMP_GE_IMM,         "ia64_cmp_ge_imm", NONE, NONE, IREG)
-MINI_OP(OP_IA64_CMP_GT_IMM,         "ia64_cmp_gt_imm", NONE, NONE, IREG)
-MINI_OP(OP_IA64_CMP_LT_UN_IMM,      "ia64_cmp_lt_un_imm", NONE, NONE, IREG)
-MINI_OP(OP_IA64_CMP_GT_UN_IMM,      "ia64_cmp_gt_un_imm", NONE, NONE, IREG)
-MINI_OP(OP_IA64_CMP_GE_UN_IMM,      "ia64_cmp_ge_un_imm", NONE, NONE, IREG)
-MINI_OP(OP_IA64_CMP_LE_UN_IMM,      "ia64_cmp_le_un_imm", NONE, NONE, IREG)
-
-MINI_OP(OP_IA64_FCMP_EQ,         "ia64_fcmp_eq", NONE, IREG, IREG)
-MINI_OP(OP_IA64_FCMP_NE,         "ia64_fcmp_ne", NONE, IREG, IREG)
-MINI_OP(OP_IA64_FCMP_LE,         "ia64_fcmp_le", NONE, IREG, IREG)
-MINI_OP(OP_IA64_FCMP_LT,         "ia64_fcmp_lt", NONE, IREG, IREG)
-MINI_OP(OP_IA64_FCMP_GE,         "ia64_fcmp_ge", NONE, IREG, IREG)
-MINI_OP(OP_IA64_FCMP_GT,         "ia64_fcmp_gt", NONE, IREG, IREG)
-MINI_OP(OP_IA64_FCMP_LT_UN,      "ia64_fcmp_lt_un", NONE, IREG, IREG)
-MINI_OP(OP_IA64_FCMP_GT_UN,      "ia64_fcmp_gt_un", NONE, IREG, IREG)
-MINI_OP(OP_IA64_FCMP_GE_UN,      "ia64_fcmp_ge_un", NONE, IREG, IREG)
-MINI_OP(OP_IA64_FCMP_LE_UN,      "ia64_fcmp_le_un", NONE, IREG, IREG)
-
-MINI_OP(OP_IA64_BR_COND,        "ia64_br_cond", NONE, NONE, NONE)
-MINI_OP(OP_IA64_COND_EXC,       "ia64_cond_exc", NONE, NONE, NONE)
-MINI_OP(OP_IA64_CSET,           "ia64_cset", IREG, NONE, NONE)
-
-MINI_OP(OP_IA64_STOREI1_MEMBASE_INC_REG, "ia64_storei1_membase_inc_reg", IREG, IREG, NONE)
-MINI_OP(OP_IA64_STOREI2_MEMBASE_INC_REG, "ia64_storei2_membase_inc_reg", IREG, IREG, NONE)
-MINI_OP(OP_IA64_STOREI4_MEMBASE_INC_REG, "ia64_storei4_membase_inc_reg", IREG, IREG, NONE)
-MINI_OP(OP_IA64_STOREI8_MEMBASE_INC_REG, "ia64_storei8_membase_inc_reg", IREG, IREG, NONE)
-MINI_OP(OP_IA64_STORER4_MEMBASE_INC_REG, "ia64_storer4_membase_inc_reg", IREG, IREG, NONE)
-MINI_OP(OP_IA64_STORER8_MEMBASE_INC_REG, "ia64_storer8_membase_inc_reg", IREG, IREG, NONE)
-MINI_OP(OP_IA64_LOADI1_MEMBASE_INC,"ia64_loadi1_membase_inc", IREG, IREG, NONE)
-MINI_OP(OP_IA64_LOADU1_MEMBASE_INC,"ia64_loadu1_membase_inc", IREG, IREG, NONE)
-MINI_OP(OP_IA64_LOADI2_MEMBASE_INC,"ia64_loadi2_membase_inc", IREG, IREG, NONE)
-MINI_OP(OP_IA64_LOADU2_MEMBASE_INC,"ia64_loadu2_membase_inc", IREG, IREG, NONE)
-MINI_OP(OP_IA64_LOADI4_MEMBASE_INC,"ia64_loadi4_membase_inc", IREG, IREG, NONE)
-MINI_OP(OP_IA64_LOADU4_MEMBASE_INC,"ia64_loadu4_membase_inc", IREG, IREG, NONE)
-MINI_OP(OP_IA64_LOADI8_MEMBASE_INC,"ia64_loadi8_membase_inc", IREG, IREG, NONE)
-MINI_OP(OP_IA64_LOADR4_MEMBASE_INC,"ia64_loadr4_membase_inc", IREG, IREG, NONE)
-MINI_OP(OP_IA64_LOADR8_MEMBASE_INC,"ia64_loadr8_membase_inc", IREG, IREG, NONE)
+MINI_OP(OP_S390_CRJ,            "s390_crj", IREG, IREG, IREG)
+MINI_OP(OP_S390_CLRJ,           "s390_crj_un", IREG, IREG, IREG)
+MINI_OP(OP_S390_CGRJ,           "s390_cgrj", LREG, LREG, IREG)
+MINI_OP(OP_S390_CLGRJ,          "s390_cgrj_un", LREG, LREG, IREG)
+MINI_OP(OP_S390_CIJ,            "s390_cij", IREG, NONE, NONE)
+MINI_OP(OP_S390_CLIJ,           "s390_cij_un", IREG, IREG, NONE)
+MINI_OP(OP_S390_CGIJ,           "s390_cgij", LREG, NONE, NONE)
+MINI_OP(OP_S390_CLGIJ,          "s390_cgij_un", LREG, NONE, NONE)
 #endif
 
 #if defined(__mips__)
@@ -1386,12 +1305,18 @@ MINI_OP(OP_ARM64_CBNZX, "arm64_cbnzx", NONE, IREG, NONE)
 #endif
 
 /* Same as OUTARG_VT, but has a dreg */
-#ifdef ENABLE_LLVM
 MINI_OP(OP_LLVM_OUTARG_VT,	"llvm_outarg_vt", IREG, VREG, NONE)
-#endif
 
 MINI_OP(OP_OBJC_GET_SELECTOR, "objc_get_selector", IREG, NONE, NONE)
 
 MINI_OP(OP_GET_SP, "get_sp", IREG, NONE, NONE)
 MINI_OP(OP_SET_SP, "set_sp", NONE, IREG, NONE)
 
+MINI_OP(OP_GET_LAST_ERROR, "get_last_error", IREG, NONE, NONE)
+
+/*
+ * Fill out a MonoContext contained in a MonoProfilerCallContext. This only
+ * stores the stack pointer, frame pointer, and callee-saved registers. This
+ * should be enough to locate arguments and variables.
+ */
+MINI_OP(OP_FILL_PROF_CALL_CTX, "fill_prof_call_ctx", NONE, IREG, NONE)

@@ -1,16 +1,20 @@
-/*
- * branch-opts.c: Branch optimizations support 
+/**
+ * \file
+ * Branch optimizations support
  *
  * Authors:
  *   Patrik Torstensson (Patrik.Torstesson at gmail.com)
  *
  * (C) 2005 Ximian, Inc.  http://www.ximian.com
  * Copyright 2011 Xamarin Inc.  http://www.xamarin.com
+ * Licensed under the MIT license. See LICENSE file in the project root for full license information.
  */
- #include "mini.h"
 
+#include "config.h"
+#include <mono/utils/mono-compiler.h>
 #ifndef DISABLE_JIT
- 
+
+#include "mini.h"
 
 /*
  * Returns true if @bb is a basic block which falls through the next block.
@@ -44,7 +48,7 @@ mono_branch_optimize_exception_target (MonoCompile *cfg, MonoBasicBlock *bb, con
 	if (bb->region == -1 || !MONO_BBLOCK_IS_IN_REGION (bb, MONO_REGION_TRY))
 		return NULL;
 
-	exclass = mono_class_from_name (mono_get_corlib (), "System", exname);
+	exclass = mono_class_load_from_name (mono_get_corlib (), "System", exname);
 	/* search for the handler */
 	for (i = 0; i < header->num_clauses; ++i) {
 		clause = &header->clauses [i];
@@ -208,9 +212,11 @@ mono_replace_ins (MonoCompile *cfg, MonoBasicBlock *bb, MonoInst *ins, MonoInst 
 
 		/* Multiple BBs */
 
-		/* Set region */
-		for (tmp = first_bb; tmp; tmp = tmp->next_bb)
+		/* Set region/real_offset */
+		for (tmp = first_bb; tmp; tmp = tmp->next_bb) {
 			tmp->region = bb->region;
+			tmp->real_offset = bb->real_offset;
+		}
 
 		/* Split the original bb */
 		if (ins->next)
@@ -248,7 +254,8 @@ mono_replace_ins (MonoCompile *cfg, MonoBasicBlock *bb, MonoInst *ins, MonoInst 
 		bb->has_array_access |= first_bb->has_array_access;
 
 		/* Delete the links between the original bb and its successors */
-		tmp_bblocks = bb->out_bb;
+		tmp_bblocks = mono_mempool_alloc0 (cfg->mempool, sizeof (MonoBasicBlock*) * bb->out_count);
+		memcpy (tmp_bblocks, bb->out_bb, sizeof (MonoBasicBlock*) * bb->out_count);
 		count = bb->out_count;
 		for (i = 0; i < count; ++i)
 			mono_unlink_bblock (cfg, bb, tmp_bblocks [i]);
@@ -812,17 +819,9 @@ replace_in_block (MonoBasicBlock *bb, MonoBasicBlock *orig, MonoBasicBlock *repl
 }
 
 static void
-replace_out_block_in_code (MonoBasicBlock *bb, MonoBasicBlock *orig, MonoBasicBlock *repl) {
+replace_out_block_in_code (MonoBasicBlock *bb, MonoBasicBlock *orig, MonoBasicBlock *repl)
+{
 	MonoInst *ins;
-
-#if defined(__native_client_codegen__)
-	/* Need to maintain this flag for the new block because */
-	/* we can't jump indirectly to a non-aligned block.     */
-	if (orig->flags & BB_INDIRECT_JUMP_TARGET)
-	{
-		repl->flags |= BB_INDIRECT_JUMP_TARGET;
-	}
-#endif
 	
 	for (ins = bb->code; ins != NULL; ins = ins->next) {
 		switch (ins->opcode) {
@@ -967,14 +966,11 @@ mono_merge_basic_blocks (MonoCompile *cfg, MonoBasicBlock *bb, MonoBasicBlock *b
 	MonoBasicBlock *prev_bb;
 	int i;
 
+	/* There may be only one control flow edge between two BBs that we merge, and it should connect these BBs together. */
+	g_assert (bb->out_count == 1 && bbn->in_count == 1 && bb->out_bb [0] == bbn && bbn->in_bb [0] == bb);
+
 	bb->has_array_access |= bbn->has_array_access;
 	bb->extended |= bbn->extended;
-
-	/* Compute prev_bb if possible to avoid the linear search below */
-	prev_bb = NULL;
-	for (i = 0; i < bbn->in_count; ++i)
-		if (bbn->in_bb [0]->next_bb == bbn)
-			prev_bb = bbn->in_bb [0];
 
 	mono_unlink_bblock (cfg, bb, bbn);
 	for (i = 0; i < bbn->out_count; ++i)
@@ -1028,10 +1024,14 @@ mono_merge_basic_blocks (MonoCompile *cfg, MonoBasicBlock *bb, MonoBasicBlock *b
 		bb->last_ins = bbn->last_ins;
 	}
 
-	if (!prev_bb) {
+
+	/* Check if the control flow predecessor is also the linear IL predecessor. */
+	if (bbn->in_bb [0]->next_bb == bbn)
+		prev_bb = bbn->in_bb [0];
+	else
+		/* If it isn't, look for one among all basic blocks. */
 		for (prev_bb = cfg->bb_entry; prev_bb && prev_bb->next_bb != bbn; prev_bb = prev_bb->next_bb)
 			;
-	}
 	if (prev_bb) {
 		prev_bb->next_bb = bbn->next_bb;
 	} else {
@@ -1474,4 +1474,8 @@ mono_optimize_branches (MonoCompile *cfg)
 	} while (changed && (niterations > 0));
 }
 
-#endif /* DISABLE_JIT */
+#else /* !DISABLE_JIT */
+
+MONO_EMPTY_SOURCE_FILE (branch_opts);
+
+#endif /* !DISABLE_JIT */

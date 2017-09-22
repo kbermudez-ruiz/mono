@@ -473,6 +473,13 @@ namespace Mono.CSharp
 			Emit (ec, false, false);
 		}
 
+		public void EmitPrepare (EmitContext ec)
+		{
+			foreach (var a in args) {
+				a.Expr.EmitPrepare (ec);
+			}
+		}
+
 		//
 		// if `dup_args' is true or any of arguments contains await.
 		// A copy of all arguments will be returned to the caller
@@ -651,13 +658,35 @@ namespace Mono.CSharp
 		//
 		// Returns dynamic when at least one argument is of dynamic type
 		//
-		public void Resolve (ResolveContext ec, out bool dynamic)
+		public void Resolve (ResolveContext rc, out bool dynamic)
 		{
 			dynamic = false;
+
+			List<LocalVariable> var_locals = null;
 			foreach (Argument a in args) {
-				a.Resolve (ec);
-				if (a.Type.BuiltinType == BuiltinTypeSpec.Type.Dynamic && !a.IsByRef)
+				a.Resolve (rc);
+
+				if (a.Type.BuiltinType == BuiltinTypeSpec.Type.Dynamic && !a.IsByRef) {
 					dynamic = true;
+					continue;
+				}
+
+				if (a.Type == InternalType.VarOutType) {
+					var de = a.Expr as DeclarationExpression;
+					if (de != null) {
+						if (var_locals == null)
+							var_locals = new List<LocalVariable> ();
+
+						var_locals.Add (de.Variable);
+						continue;
+					}
+
+					var lvr = a.Expr as LocalVariableReference;
+					if (lvr != null && var_locals != null && var_locals.Contains (lvr.local_info)) {
+						rc.Report.Error (8196, lvr.Location, "Reference to an implicitly typed out variable `{0}' is not permitted in the same argument list", lvr.Name);
+						lvr.Type = InternalType.ErrorType;
+					}
+				}
 			}
 		}
 

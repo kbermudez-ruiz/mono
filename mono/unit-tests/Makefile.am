@@ -3,17 +3,18 @@ AM_CPPFLAGS = -I$(top_srcdir) -I$(top_srcdir)/mono $(LIBGC_CPPFLAGS) $(GLIB_CFLA
 test_cflags = $(AM_CFLAGS) $(SGEN_DEFINES)
 test_ldadd = libtestlib.la \
 	$(LIBGC_LIBS) $(GLIB_LIBS) -lm $(LIBICONV)
-if PLATFORM_DARWIN
+if HOST_DARWIN
 test_ldflags = -framework CoreFoundation -framework Foundation
 endif
 
 if !CROSS_COMPILE
 if !HOST_WIN32
 if SUPPORT_BOEHM
+if SUPPORT_SGEN
 
 noinst_LTLIBRARIES = libtestlib.la
 libtestlib_la_SOURCES =
-libtestlib_la_LIBADD = ../metadata/libmonoruntimesgen.la ../sgen/libmonosgen.la ../utils/libmonoutils.la ../io-layer/libwapi.la 
+libtestlib_la_LIBADD = ../metadata/libmonoruntimesgen.la ../sgen/libmonosgen.la ../utils/libmonoutils.la
 
 test_sgen_qsort_SOURCES = test-sgen-qsort.c
 test_sgen_qsort_CFLAGS = $(test_cflags)
@@ -54,6 +55,7 @@ check-local:
 		echo "</test-case></results></test-suite></test-results>" >> TestResult-unit-tests.xml; \
 	fi;
 
+endif SUPPORT_SGEN
 endif SUPPORT_BOEHM
 endif !HOST_WIN32
 endif !CROSS_COMPILE

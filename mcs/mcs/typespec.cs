@@ -92,6 +92,12 @@ namespace Mono.CSharp
 			}
 		}
 
+		public bool HasNamedTupleElement {
+			get {
+				return (state & StateFlags.HasNamedTupleElement) != 0;
+			}
+		}
+
 		//
 		// Returns a list of all interfaces including
 		// interfaces from base type or base interfaces
@@ -109,7 +115,6 @@ namespace Mono.CSharp
 					var imported = MemberDefinition as ImportedTypeDefinition;
 					if (imported != null && Kind != MemberKind.MissingType)
 						imported.DefineInterfaces (this);
-
 				}
 
 				return ifaces;
@@ -229,6 +234,18 @@ namespace Mono.CSharp
 			}
 			set {
 				state = value ? state | StateFlags.GenericTask : state & ~StateFlags.GenericTask;
+			}
+		}
+
+		//
+		// Returns true for instances of any System.ValueTuple<......> type
+		//
+		public virtual bool IsTupleType {
+			get {
+				return (state & StateFlags.Tuple) != 0;
+			}
+			set {
+				state = value ? state | StateFlags.Tuple : state & ~StateFlags.Tuple;
 			}
 		}
 
@@ -534,7 +551,9 @@ namespace Mono.CSharp
 			if (IsNested) {
 				s = DeclaringType.GetSignatureForError ();
 			} else if (MemberDefinition is AnonymousTypeClass) {
-				return ((AnonymousTypeClass) MemberDefinition).GetSignatureForError ();
+				return ((AnonymousTypeClass)MemberDefinition).GetSignatureForError ();
+			} else if (IsTupleType) {
+				return FormatTupleSignature ();
 			} else {
 				s = MemberDefinition.Namespace;
 			}
@@ -545,9 +564,32 @@ namespace Mono.CSharp
 			return s + Name + GetTypeNameSignature ();
 		}
 
+		string FormatTupleSignature ()
+		{
+			var sb = new StringBuilder ();
+			sb.Append ("(");
+			for (int i = 0; i < TypeArguments.Length; ++i) {
+				if (i != 0)
+					sb.Append (", ");
+
+				sb.Append (TypeArguments[i].GetSignatureForError ());
+			}
+			sb.Append (")");
+
+			return sb.ToString ();
+		}
+
 		public string GetSignatureForErrorIncludingAssemblyName ()
 		{
-			return string.Format ("{0} [{1}]", GetSignatureForError (), MemberDefinition.DeclaringAssembly.FullName);
+			var imported = MemberDefinition.DeclaringAssembly as ImportedAssemblyDefinition;
+
+			var location = imported != null ?
+				System.IO.Path.GetFullPath (imported.Location) :
+			    ((MemberCore)MemberDefinition).Location.NameFullPath;
+
+			return string.Format ("{0} [{1} -- {2}]", GetSignatureForError (),
+								  MemberDefinition.DeclaringAssembly.FullName,
+								  location);
 		}
 
 		protected virtual string GetTypeNameSignature ()
@@ -1425,6 +1467,7 @@ namespace Mono.CSharp
 		public static readonly InternalType Namespace = new InternalType ("<namespace>");
 		public static readonly InternalType ErrorType = new InternalType ("<error>");
 		public static readonly InternalType VarOutType = new InternalType ("var out");
+		public static readonly InternalType ThrowExpr = new InternalType ("throw expression");
 
 		readonly string name;
 
@@ -1566,6 +1609,11 @@ namespace Mono.CSharp
 		}
 
 		#endregion
+
+		public static bool HasNoType (TypeSpec type)
+		{
+			return type == AnonymousMethod || type == MethodGroup || type == NullLiteral || type == ThrowExpr;
+		}
 	}
 
 	//
@@ -1594,6 +1642,12 @@ namespace Mono.CSharp
 		#region Properties
 
 		public TypeSpec Element { get; private set; }
+
+		public override IList<TypeSpec> Interfaces {
+			set {
+				throw new NotSupportedException ();
+			}
+		}
 
 		bool ITypeDefinition.IsComImport {
 			get {
@@ -1769,11 +1823,17 @@ namespace Mono.CSharp
 		readonly int rank;
 		readonly ModuleContainer module;
 
-		private ArrayContainer (ModuleContainer module, TypeSpec element, int rank)
+		ArrayContainer (ModuleContainer module, TypeSpec element, int rank)
 			: base (MemberKind.ArrayType, element, null)
 		{
 			this.module = module;
 			this.rank = rank;
+		}
+
+		public override IList<TypeSpec> Interfaces {
+			get {
+				return BaseType.Interfaces;
+			}
 		}
 
 		public int Rank {
@@ -1918,7 +1978,6 @@ namespace Mono.CSharp
 			if (!module.ArrayTypesCache.TryGetValue (key, out ac)) {
 				ac = new ArrayContainer (module, element, rank);
 				ac.BaseType = module.Compiler.BuiltinTypes.Array;
-				ac.Interfaces = ac.BaseType.Interfaces;
 
 				module.ArrayTypesCache.Add (key, ac);
 			}
@@ -1934,9 +1993,15 @@ namespace Mono.CSharp
 
 	class ReferenceContainer : ElementTypeSpec
 	{
-		private ReferenceContainer (TypeSpec element)
+		ReferenceContainer (TypeSpec element)
 			: base (MemberKind.Class, element, null)	// TODO: Kind.Class is most likely wrong
 		{
+		}
+
+		public override IList<TypeSpec> Interfaces {
+			get {
+				return null;
+			}
 		}
 
 		public override MetaType GetMetaInfo ()
@@ -1967,6 +2032,12 @@ namespace Mono.CSharp
 		{
 			// It's never CLS-Compliant
 			state &= ~StateFlags.CLSCompliant_Undetected;
+		}
+
+		public override IList<TypeSpec> Interfaces {
+			get {
+				return null;
+			}
 		}
 
 		public override MetaType GetMetaInfo ()

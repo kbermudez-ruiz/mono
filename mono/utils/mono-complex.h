@@ -1,10 +1,12 @@
-/*
-* mono-complex.h: C99 Complex math cross-platform support code
+/**
+ * \file
+* C99 Complex math cross-platform support code
 *
 * Author:
 *	Joao Matos (joao.matos@xamarin.com)
 *
 * Copyright 2015 Xamarin, Inc (http://www.xamarin.com)
+* Licensed under the MIT license. See LICENSE file in the project root for full license information.
 */
 
 #include <config.h>

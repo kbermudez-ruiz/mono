@@ -244,6 +244,10 @@ namespace Mono.CSharp
 				Module.PredefinedAttributes.Dynamic.EmitAttribute (FieldBuilder, member_type, Location);
 			}
 
+			if (member_type.HasNamedTupleElement) {
+				Module.PredefinedAttributes.TupleElementNames.EmitAttribute (FieldBuilder, member_type, Location);
+			}
+
 			if ((ModFlags & Modifiers.COMPILER_GENERATED) != 0 && !Parent.IsCompilerGenerated)
 				Module.PredefinedAttributes.CompilerGenerated.EmitAttribute (FieldBuilder);
 			if ((ModFlags & Modifiers.DEBUGGER_HIDDEN) != 0)
@@ -257,7 +261,8 @@ namespace Mono.CSharp
 				Report.Error (625, Location, "`{0}': Instance field types marked with StructLayout(LayoutKind.Explicit) must have a FieldOffset attribute", GetSignatureForError ());
 			}
 
-			ConstraintChecker.Check (this, member_type, type_expr.Location);
+			if (!IsCompilerGenerated)
+				ConstraintChecker.Check (this, member_type, type_expr.Location);
 
 			base.Emit ();
 		}
@@ -311,7 +316,7 @@ namespace Mono.CSharp
 			}
 		}
 
-#endregion
+		#endregion
 
 		public FieldInfo GetMetaInfo ()
 		{

@@ -4,6 +4,7 @@ using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Runtime.CompilerServices;
+using System.Collections;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 
@@ -84,6 +85,7 @@ class Tests
 	}
 
 	[Category ("DYNCALL")]
+	[Category ("!FULLAOT-AMD64")]
 	static int test_0_arm64_dyncall_hfa_double () {
 		double arg1 = 1.0f;
 		// HFA with double members
@@ -97,6 +99,7 @@ class Tests
 	}
 
 	[Category ("DYNCALL")]
+	[Category ("!FULLAOT-AMD64")]
 	static int test_0_arm64_dyncall_hfa_float () {
 		double arg1 = 1.0f;
 		var s = new Struct2 ();
@@ -110,6 +113,7 @@ class Tests
 
 	[Category ("DYNCALL")]
 	[Category ("GSHAREDVT")]
+	[Category ("!FULLAOT-AMD64")]
 	static int test_0_arm64_dyncall_gsharedvt_out_hfa_double () {
 		/* gsharedvt out trampoline with double hfa argument */
 		double arg1 = 1.0f;
@@ -129,6 +133,7 @@ class Tests
 
 	[Category ("DYNCALL")]
 	[Category ("GSHAREDVT")]
+	[Category ("!FULLAOT-AMD64")]
 	static int test_0_arm64_dyncall_gsharedvt_out_hfa_float () {
 		/* gsharedvt out trampoline with double hfa argument */
 		double arg1 = 1.0f;
@@ -190,6 +195,8 @@ class Tests
 	}
 
 	[Category ("DYNCALL")]
+	[Category ("GSHAREDVT")]
+	[Category ("!FULLAOT-AMD64")]
 	static int test_0_arm64_dyncall_vtypebyref_ret () {
 		var s = new VTypeByRefStruct () { o1 = 1, o2 = 2, o3 = 3 };
 		Type t = typeof (Foo5<>).MakeGenericType (new Type [] { typeof (VTypeByRefStruct) });
@@ -210,7 +217,8 @@ class Tests
 		}
 	}
 
-	[Category("DYNCALL")]
+	[Category ("DYNCALL")]
+	[Category ("GSHAREDVT")]
 	static int test_0_arm_dyncall_reg_stack_split () {
 		var m = typeof (Foo6).GetMethod ("reg_stack_split_inner").MakeGenericMethod (new Type[] { typeof (long) });
 		var o = new Foo6 ();
@@ -251,6 +259,7 @@ class Tests
 	}
 
 	[Category ("DYNCALL")]
+	[Category ("!FULLAOT-AMD64")]
 	public static int test_0_dyncall_nullable () {
 		int? v;
 
@@ -367,6 +376,7 @@ class Tests
 		return 0;
 	}
 
+	[Category ("DYNCALL")]
 	public static int test_0_array_accessor_runtime_invoke_ref () {
 		var t = typeof (string[]);
 		var arr = Array.CreateInstance (typeof (string), 1);
@@ -399,6 +409,7 @@ class Tests
 	}
 
 	[Category ("DYNCALL")]
+	[Category ("!FULLAOT-AMD64")]
 	public static int test_0_large_nullable_invoke () {
 		var s = new LargeStruct () { a = 1, b = 2, c = 3, d = 4 };
 
@@ -473,6 +484,18 @@ class Tests
 		IEnumerable<string[]> iface = arr;
 		var m = typeof(IEnumerable<string[]>).GetMethod ("GetEnumerator");
 		m.Invoke (arr, null);
+		return 0;
+	}
+
+	public static int test_0_fault_clauses () {
+		object [] data = { 1, 2, 3 };
+		int [] expected = { 1, 2, 3 };
+
+		try {
+			Action d = delegate () { data.Cast<IEnumerable> ().GetEnumerator ().MoveNext (); };
+			d ();
+		} catch (Exception ex) {
+		}
 		return 0;
 	}
 }

@@ -1,5 +1,6 @@
-/*
- * checked-build.c: Expensive asserts used when mono is built with --with-checked-build=yes
+/**
+ * \file
+ * Expensive asserts used when mono is built with --with-checked-build=yes
  *
  * Author:
  *	Rodrigo Kumpera (kumpera@gmail.com)
@@ -8,10 +9,11 @@
  */
 #include <config.h>
 
-#ifdef CHECKED_BUILD
+#ifdef ENABLE_CHECKED_BUILD
 
 #include <mono/utils/checked-build.h>
 #include <mono/utils/mono-threads.h>
+#include <mono/utils/mono-threads-coop.h>
 #include <mono/utils/mono-tls.h>
 #include <mono/metadata/mempool.h>
 #include <mono/metadata/metadata-internals.h>
@@ -24,6 +26,63 @@
 #include <execinfo.h>
 #endif
 
+// Selective-enable support
+
+// Returns true for check modes which are allowed by both the current DISABLE_ macros and the MONO_CHECK_MODE env var.
+// Argument may be a bitmask; if so, result is true if at least one specified mode is enabled.
+mono_bool
+mono_check_mode_enabled (MonoCheckMode query)
+{
+	static MonoCheckMode check_mode = MONO_CHECK_MODE_UNKNOWN;
+	if (G_UNLIKELY (check_mode == MONO_CHECK_MODE_UNKNOWN))
+	{
+		MonoCheckMode env_check_mode = MONO_CHECK_MODE_NONE;
+		const gchar *env_string = g_getenv ("MONO_CHECK_MODE");
+
+		if (env_string)
+		{
+			gchar **env_split = g_strsplit (env_string, ",", 0);
+			for (gchar **env_component = env_split; *env_component; env_component++)
+			{
+				mono_bool check_all = g_str_equal (*env_component, "all");
+#ifdef ENABLE_CHECKED_BUILD_GC
+				if (check_all || g_str_equal (*env_component, "gc"))
+					env_check_mode |= MONO_CHECK_MODE_GC;
+#endif
+#ifdef ENABLE_CHECKED_BUILD_METADATA
+				if (check_all || g_str_equal (*env_component, "metadata"))
+					env_check_mode |= MONO_CHECK_MODE_METADATA;
+#endif
+#ifdef ENABLE_CHECKED_BUILD_THREAD
+				if (check_all || g_str_equal (*env_component, "thread"))
+					env_check_mode |= MONO_CHECK_MODE_THREAD;
+#endif
+			}
+			g_strfreev (env_split);
+			g_free (env_string);
+		}
+
+		check_mode = env_check_mode;
+	}
+	return check_mode & query;
+}
+
+static int
+mono_check_transition_limit (void)
+{
+	static int transition_limit = -1;
+	if (transition_limit < 0) {
+		const gchar *env_string = g_getenv ("MONO_CHECK_THREAD_TRANSITION_HISTORY");
+		if (env_string) {
+			transition_limit = atoi (env_string);
+			g_free (env_string);
+		} else {
+			transition_limit = 3;
+		}
+	}
+	return transition_limit;
+}
+
 typedef struct {
 	GPtrArray *transitions;
 	guint32 in_gc_critical_region;
@@ -34,7 +93,9 @@ static MonoNativeTlsKey thread_status;
 void
 checked_build_init (void)
 {
-	mono_native_tls_alloc (&thread_status, NULL);
+	// Init state for get_state, which can be called either by gc or thread mode
+	if (mono_check_mode_enabled (MONO_CHECK_MODE_GC | MONO_CHECK_MODE_THREAD))
+		mono_native_tls_alloc (&thread_status, NULL);
 }
 
 static CheckState*
@@ -50,11 +111,11 @@ get_state (void)
 	return state;
 }
 
-#if !defined(DISABLE_CHECKED_BUILD_THREAD)
+#ifdef ENABLE_CHECKED_BUILD_THREAD
 
 #define MAX_NATIVE_BT 6
 #define MAX_NATIVE_BT_PROBE (MAX_NATIVE_BT + 5)
-#define MAX_TRANSITIONS 3
+#define MAX_TRANSITIONS (mono_check_transition_limit ())
 
 #ifdef HAVE_BACKTRACE_SYMBOLS
 
@@ -89,7 +150,7 @@ translate_backtrace (gpointer native_trace[], int size)
 			g_string_append_printf (bt, "\tat %s\n", names [i]);
 	}
 
-	free (names);
+	g_free (names);
 	return g_string_free (bt, FALSE);
 }
 
@@ -124,10 +185,12 @@ free_transition (ThreadTransition *t)
 void
 checked_build_thread_transition (const char *transition, void *info, int from_state, int suspend_count, int next_state, int suspend_count_delta)
 {
-	MonoThreadInfo *cur = mono_thread_info_current_unchecked ();
+	if (!mono_check_mode_enabled (MONO_CHECK_MODE_THREAD))
+		return;
+
 	CheckState *state = get_state ();
 	/* We currently don't record external changes as those are hard to reason about. */
-	if (cur != info)
+	if (!mono_thread_info_is_current (info))
 		return;
 
 	if (state->transitions->len >= MAX_TRANSITIONS)
@@ -143,16 +206,11 @@ checked_build_thread_transition (const char *transition, void *info, int from_st
 	g_ptr_array_add (state->transitions, t);
 }
 
-#endif /* !defined(DISABLE_CHECKED_BUILD_THREAD) */
-
-#if !defined(DISABLE_CHECKED_BUILD_GC)
-
-static void
-assertion_fail (const char *msg, ...)
+void
+mono_fatal_with_history (const char *msg, ...)
 {
 	int i;
 	GString* err = g_string_sized_new (100);
-	CheckState *state = get_state ();
 
 	g_string_append_printf (err, "Assertion failure in thread %p due to: ", mono_native_thread_id_get ());
 
@@ -161,52 +219,67 @@ assertion_fail (const char *msg, ...)
 	g_string_append_vprintf (err, msg, args);
 	va_end (args);
 
-	g_string_append_printf (err, "\nLast %d state transitions: (most recent first)\n", state->transitions->len);
+	if (mono_check_mode_enabled (MONO_CHECK_MODE_THREAD))
+	{
+		CheckState *state = get_state ();
 
-	for (i = state->transitions->len - 1; i >= 0; --i) {
-		ThreadTransition *t = state->transitions->pdata [i];
-		char *bt = translate_backtrace (t->backtrace, t->size);
-		g_string_append_printf (err, "[%s] %s -> %s (%d) %s%d at:\n%s",
-			t->name,
-			mono_thread_state_name (t->from_state),
-			mono_thread_state_name (t->next_state),
-			t->suspend_count,
-			t->suspend_count_delta > 0 ? "+" : "", //I'd like to see this sort of values: -1, 0, +1
-			t->suspend_count_delta,
-			bt);
-		g_free (bt);
+		g_string_append_printf (err, "\nLast %d state transitions: (most recent first)\n", state->transitions->len);
+
+		for (i = state->transitions->len - 1; i >= 0; --i) {
+			ThreadTransition *t = state->transitions->pdata [i];
+			char *bt = translate_backtrace (t->backtrace, t->size);
+			g_string_append_printf (err, "[%s] %s -> %s (%d) %s%d at:\n%s",
+				t->name,
+				mono_thread_state_name (t->from_state),
+				mono_thread_state_name (t->next_state),
+				t->suspend_count,
+				t->suspend_count_delta > 0 ? "+" : "", //I'd like to see this sort of values: -1, 0, +1
+				t->suspend_count_delta,
+				bt);
+			g_free (bt);
+		}
 	}
 
 	g_error (err->str);
 	g_string_free (err, TRUE);
 }
 
+#endif /* defined(ENABLE_CHECKED_BUILD_THREAD) */
+
+#ifdef ENABLE_CHECKED_BUILD_GC
+
 void
-assert_gc_safe_mode (void)
+assert_gc_safe_mode (const char *file, int lineno)
 {
+	if (!mono_check_mode_enabled (MONO_CHECK_MODE_GC))
+		return;
+
 	MonoThreadInfo *cur = mono_thread_info_current ();
 	int state;
 
 	if (!cur)
-		assertion_fail ("Expected GC Safe mode but thread is not attached");
+		mono_fatal_with_history ("%s:%d: Expected GC Safe mode but thread is not attached", file, lineno);
 
 	switch (state = mono_thread_info_current_state (cur)) {
 	case STATE_BLOCKING:
 	case STATE_BLOCKING_AND_SUSPENDED:
 		break;
 	default:
-		assertion_fail ("Expected GC Safe mode but was in %s state", mono_thread_state_name (state));
+		mono_fatal_with_history ("%s:%d: Expected GC Safe mode but was in %s state", file, lineno, mono_thread_state_name (state));
 	}
 }
 
 void
-assert_gc_unsafe_mode (void)
+assert_gc_unsafe_mode (const char *file, int lineno)
 {
+	if (!mono_check_mode_enabled (MONO_CHECK_MODE_GC))
+		return;
+
 	MonoThreadInfo *cur = mono_thread_info_current ();
 	int state;
 
 	if (!cur)
-		assertion_fail ("Expected GC Unsafe mode but thread is not attached");
+		mono_fatal_with_history ("%s:%d: Expected GC Unsafe mode but thread is not attached", file, lineno);
 
 	switch (state = mono_thread_info_current_state (cur)) {
 	case STATE_RUNNING:
@@ -214,18 +287,21 @@ assert_gc_unsafe_mode (void)
 	case STATE_SELF_SUSPEND_REQUESTED:
 		break;
 	default:
-		assertion_fail ("Expected GC Unsafe mode but was in %s state", mono_thread_state_name (state));
+		mono_fatal_with_history ("%s:%d: Expected GC Unsafe mode but was in %s state", file, lineno, mono_thread_state_name (state));
 	}
 }
 
 void
-assert_gc_neutral_mode (void)
+assert_gc_neutral_mode (const char *file, int lineno)
 {
+	if (!mono_check_mode_enabled (MONO_CHECK_MODE_GC))
+		return;
+
 	MonoThreadInfo *cur = mono_thread_info_current ();
 	int state;
 
 	if (!cur)
-		assertion_fail ("Expected GC Neutral mode but thread is not attached");
+		mono_fatal_with_history ("%s:%d: Expected GC Neutral mode but thread is not attached", file, lineno);
 
 	switch (state = mono_thread_info_current_state (cur)) {
 	case STATE_RUNNING:
@@ -235,13 +311,16 @@ assert_gc_neutral_mode (void)
 	case STATE_BLOCKING_AND_SUSPENDED:
 		break;
 	default:
-		assertion_fail ("Expected GC Neutral mode but was in %s state", mono_thread_state_name (state));
+		mono_fatal_with_history ("%s:%d: Expected GC Neutral mode but was in %s state", file, lineno, mono_thread_state_name (state));
 	}
 }
 
 void *
 critical_gc_region_begin(void)
 {
+	if (!mono_check_mode_enabled (MONO_CHECK_MODE_GC))
+		return NULL;
+
 	CheckState *state = get_state ();
 	state->in_gc_critical_region++;
 	return state;
@@ -251,6 +330,9 @@ critical_gc_region_begin(void)
 void
 critical_gc_region_end(void* token)
 {
+	if (!mono_check_mode_enabled (MONO_CHECK_MODE_GC))
+		return;
+
 	CheckState *state = get_state();
 	g_assert (state == token);
 	state->in_gc_critical_region--;
@@ -259,23 +341,29 @@ critical_gc_region_end(void* token)
 void
 assert_not_in_gc_critical_region(void)
 {
+	if (!mono_check_mode_enabled (MONO_CHECK_MODE_GC))
+		return;
+
 	CheckState *state = get_state();
 	if (state->in_gc_critical_region > 0) {
-		assertion_fail("Expected GC Unsafe mode, but was in %s state", mono_thread_state_name (mono_thread_info_current_state (mono_thread_info_current ())));
+		mono_fatal_with_history("Expected GC Unsafe mode, but was in %s state", mono_thread_state_name (mono_thread_info_current_state (mono_thread_info_current ())));
 	}
 }
 
 void
 assert_in_gc_critical_region (void)
 {
+	if (!mono_check_mode_enabled (MONO_CHECK_MODE_GC))
+		return;
+
 	CheckState *state = get_state();
 	if (state->in_gc_critical_region == 0)
-		assertion_fail("Expected GC critical region");
+		mono_fatal_with_history("Expected GC critical region");
 }
 
-#endif /* !defined(DISABLE_CHECKED_BUILD_GC) */
+#endif /* defined(ENABLE_CHECKED_BUILD_GC) */
 
-#if !defined(DISABLE_CHECKED_BUILD_METADATA)
+#ifdef ENABLE_CHECKED_BUILD_METADATA
 
 // check_metadata_store et al: The goal of these functions is to verify that if there is a pointer from one mempool into
 // another, that the pointed-to memory is protected by the reference count mechanism for MonoImages.
@@ -389,6 +477,12 @@ check_image_may_reference_image(MonoImage *from, MonoImage *to)
 			// For each queued image visit all directly referenced images
 			int inner_idx;
 
+			// 'files' and 'modules' semantically contain the same items but because of lazy loading we must check both
+			for (inner_idx = 0; !success && inner_idx < checking->file_count; inner_idx++)
+			{
+				CHECK_IMAGE_VISIT (checking->files[inner_idx]);
+			}
+
 			for (inner_idx = 0; !success && inner_idx < checking->module_count; inner_idx++)
 			{
 				CHECK_IMAGE_VISIT (checking->modules[inner_idx]);
@@ -396,8 +490,8 @@ check_image_may_reference_image(MonoImage *from, MonoImage *to)
 
 			for (inner_idx = 0; !success && inner_idx < checking->nreferences; inner_idx++)
 			{
-				// References are lazy-loaded and thus allowed to be NULL.
-				// If they are NULL, we don't care about them for this search, because they haven't impacted ref_count yet.
+				// Assembly references are lazy-loaded and thus allowed to be NULL.
+				// If they are NULL, we don't care about them for this search, because their images haven't impacted ref_count yet.
 				if (checking->references[inner_idx])
 				{
 					CHECK_IMAGE_VISIT (checking->references[inner_idx]->image);
@@ -456,10 +550,10 @@ check_image_set_may_reference_image_set (MonoImageSet *from, MonoImageSet *to)
 		if (to->images[to_idx] == mono_defaults.corlib)
 			seen = TRUE;
 
-		// For each item in to->images, scan over from->images looking for it.
+		// For each item in to->images, scan over from->images seeking a path to it.
 		for (from_idx = 0; !seen && from_idx < from->nimages; from_idx++)
 		{
-			if (to->images[to_idx] == from->images[from_idx])
+			if (check_image_may_reference_image (from->images[from_idx], to->images[to_idx]))
 				seen = TRUE;
 		}
 
@@ -543,6 +637,9 @@ mono_find_mempool_owner (void *ptr)
 static void
 check_mempool_may_reference_mempool (void *from_ptr, void *to_ptr, gboolean require_local)
 {
+	if (!mono_check_mode_enabled (MONO_CHECK_MODE_METADATA))
+		return;
+
 	// Null pointers are OK
 	if (!to_ptr)
 		return;
@@ -610,6 +707,6 @@ check_metadata_store_local (void *from, void *to)
     check_mempool_may_reference_mempool (from, to, TRUE);
 }
 
-#endif /* !defined(DISABLE_CHECKED_BUILD_METADATA) */
+#endif /* defined(ENABLE_CHECKED_BUILD_METADATA) */
 
-#endif /* CHECKED_BUILD */
+#endif /* ENABLE_CHECKED_BUILD */

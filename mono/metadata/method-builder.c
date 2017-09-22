@@ -1,11 +1,13 @@
-/*
- * method-builder.c: Functions for creating IL methods at runtime.
+/**
+ * \file
+ * Functions for creating IL methods at runtime.
  * 
  * Author:
  *   Paolo Molaro (lupus@ximian.com)
  *
  * Copyright 2002-2003 Ximian, Inc (http://www.ximian.com)
  * Copyright 2004-2009 Novell, Inc (http://www.novell.com)
+ * Licensed under the MIT license. See LICENSE file in the project root for full license information.
  */
 
 #include "config.h"
@@ -65,9 +67,10 @@ mono_mb_new_base (MonoClass *klass, MonoWrapperType type)
 	m->inline_info = 1;
 	m->wrapper_type = type;
 
-#ifndef DISABLE_JIT
+#ifdef ENABLE_ILGEN
 	mb->code_size = 40;
 	mb->code = (unsigned char *)g_malloc (mb->code_size);
+	mb->init_locals = TRUE;
 #endif
 	/* placeholder for the wrapper always at index 1 */
 	mono_mb_add_data (mb, NULL);
@@ -84,6 +87,9 @@ mono_mb_new_no_dup_name (MonoClass *klass, const char *name, MonoWrapperType typ
 	return mb;
 }
 
+/**
+ * mono_mb_new:
+ */
 MonoMethodBuilder *
 mono_mb_new (MonoClass *klass, const char *name, MonoWrapperType type)
 {
@@ -92,10 +98,19 @@ mono_mb_new (MonoClass *klass, const char *name, MonoWrapperType type)
 	return mb;
 }
 
+/**
+ * mono_mb_free:
+ */
 void
 mono_mb_free (MonoMethodBuilder *mb)
 {
-#ifndef DISABLE_JIT
+#ifdef ENABLE_ILGEN
+	GList *l;
+
+	for (l = mb->locals_list; l; l = l->next) {
+		/* Allocated in mono_mb_add_local () */
+		g_free (l->data);
+	}
 	g_list_free (mb->locals_list);
 	if (!mb->dynamic) {
 		g_free (mb->method);
@@ -113,15 +128,13 @@ mono_mb_free (MonoMethodBuilder *mb)
 
 /**
  * mono_mb_create_method:
- *
- * Create a MonoMethod from this method builder.
- * Returns: the newly created method.
- *
+ * Create a \c MonoMethod from this method builder.
+ * \returns the newly created method.
  */
 MonoMethod *
 mono_mb_create_method (MonoMethodBuilder *mb, MonoMethodSignature *signature, int max_stack)
 {
-#ifndef DISABLE_JIT
+#ifdef ENABLE_ILGEN
 	MonoMethodHeader *header;
 #endif
 	MonoMethodWrapper *mw;
@@ -134,7 +147,7 @@ mono_mb_create_method (MonoMethodBuilder *mb, MonoMethodSignature *signature, in
 
 	image = mb->method->klass->image;
 
-#ifndef DISABLE_JIT
+#ifdef ENABLE_ILGEN
 	if (mb->dynamic) {
 		method = mb->method;
 		mw = (MonoMethodWrapper*)method;
@@ -148,7 +161,7 @@ mono_mb_create_method (MonoMethodBuilder *mb, MonoMethodSignature *signature, in
 		header->code = mb->code;
 
 		for (i = 0, l = mb->locals_list; l; l = l->next, i++) {
-			header->locals [i] = mono_metadata_type_dup (NULL, (MonoType*)l->data);
+			header->locals [i] = (MonoType*)l->data;
 		}
 	} else
 #endif
@@ -164,7 +177,7 @@ mono_mb_create_method (MonoMethodBuilder *mb, MonoMethodSignature *signature, in
 		else
 			method->name = mono_image_strdup (image, mb->name);
 
-#ifndef DISABLE_JIT
+#ifdef ENABLE_ILGEN
 		mw->header = header = (MonoMethodHeader *) 
 			mono_image_alloc0 (image, MONO_SIZEOF_METHOD_HEADER + mb->locals * sizeof (MonoType *));
 
@@ -172,16 +185,22 @@ mono_mb_create_method (MonoMethodBuilder *mb, MonoMethodSignature *signature, in
 		memcpy ((char*)header->code, mb->code, mb->pos);
 
 		for (i = 0, l = mb->locals_list; l; l = l->next, i++) {
-			header->locals [i] = mono_metadata_type_dup (NULL, (MonoType*)l->data);
+			header->locals [i] = (MonoType*)l->data;
 		}
 #endif
 	}
+
+#ifdef ENABLE_ILGEN
+	/* Free the locals list so mono_mb_free () doesn't free the types twice */
+	g_list_free (mb->locals_list);
+	mb->locals_list = NULL;
+#endif
 
 	method->signature = signature;
 	if (!signature->hasthis)
 		method->flags |= METHOD_ATTRIBUTE_STATIC;
 
-#ifndef DISABLE_JIT
+#ifdef ENABLE_ILGEN
 	if (max_stack < 8)
 		max_stack = 8;
 
@@ -189,7 +208,7 @@ mono_mb_create_method (MonoMethodBuilder *mb, MonoMethodSignature *signature, in
 
 	header->code_size = mb->pos;
 	header->num_locals = mb->locals;
-	header->init_locals = TRUE;
+	header->init_locals = mb->init_locals;
 
 	header->num_clauses = mb->num_clauses;
 	header->clauses = mb->clauses;
@@ -217,7 +236,7 @@ mono_mb_create_method (MonoMethodBuilder *mb, MonoMethodSignature *signature, in
 		mw->method_data = data;
 	}
 
-#ifndef DISABLE_JIT
+#ifdef ENABLE_ILGEN
 	/*{
 		static int total_code = 0;
 		static int total_alloc = 0;
@@ -247,6 +266,9 @@ mono_mb_create_method (MonoMethodBuilder *mb, MonoMethodSignature *signature, in
 	return method;
 }
 
+/**
+ * mono_mb_add_data:
+ */
 guint32
 mono_mb_add_data (MonoMethodBuilder *mb, gpointer data)
 {
@@ -262,23 +284,36 @@ mono_mb_add_data (MonoMethodBuilder *mb, gpointer data)
 	return g_list_length ((GList *)mw->method_data);
 }
 
-#ifndef DISABLE_JIT
+#ifdef ENABLE_ILGEN
 
+/**
+ * mono_mb_add_local:
+ */
 int
 mono_mb_add_local (MonoMethodBuilder *mb, MonoType *type)
 {
 	int res;
+	MonoType *t;
+
+	/*
+	 * Have to make a copy early since type might be sig->ret,
+	 * which is transient, see mono_metadata_signature_dup_internal_with_padding ().
+	 */
+	t = mono_metadata_type_dup (NULL, type);
 
 	g_assert (mb != NULL);
 	g_assert (type != NULL);
 
 	res = mb->locals;
-	mb->locals_list = g_list_append (mb->locals_list, type);
+	mb->locals_list = g_list_append (mb->locals_list, t);
 	mb->locals++;
 
 	return res;
 }
 
+/**
+ * mono_mb_patch_addr:
+ */
 void
 mono_mb_patch_addr (MonoMethodBuilder *mb, int pos, int value)
 {
@@ -288,12 +323,18 @@ mono_mb_patch_addr (MonoMethodBuilder *mb, int pos, int value)
 	mb->code [pos + 3] = (value >> 24) & 0xff;
 }
 
+/**
+ * mono_mb_patch_addr_s:
+ */
 void
 mono_mb_patch_addr_s (MonoMethodBuilder *mb, int pos, gint8 value)
 {
 	*((gint8 *)(&mb->code [pos])) = value;
 }
 
+/**
+ * mono_mb_emit_byte:
+ */
 void
 mono_mb_emit_byte (MonoMethodBuilder *mb, guint8 op)
 {
@@ -305,6 +346,9 @@ mono_mb_emit_byte (MonoMethodBuilder *mb, guint8 op)
 	mb->code [mb->pos++] = op;
 }
 
+/**
+ * mono_mb_emit_ldflda:
+ */
 void
 mono_mb_emit_ldflda (MonoMethodBuilder *mb, gint32 offset)
 {
@@ -317,6 +361,9 @@ mono_mb_emit_ldflda (MonoMethodBuilder *mb, gint32 offset)
 	}
 }
 
+/**
+ * mono_mb_emit_i4:
+ */
 void
 mono_mb_emit_i4 (MonoMethodBuilder *mb, gint32 data)
 {
@@ -342,6 +389,9 @@ mono_mb_emit_i8 (MonoMethodBuilder *mb, gint64 data)
 	mb->pos += 8;
 }
 
+/**
+ * mono_mb_emit_i2:
+ */
 void
 mono_mb_emit_i2 (MonoMethodBuilder *mb, gint16 data)
 {
@@ -362,12 +412,18 @@ mono_mb_emit_op (MonoMethodBuilder *mb, guint8 op, gpointer data)
 	mono_mb_emit_i4 (mb, mono_mb_add_data (mb, data));
 }
 
+/**
+ * mono_mb_emit_ldstr:
+ */
 void
 mono_mb_emit_ldstr (MonoMethodBuilder *mb, char *str)
 {
 	mono_mb_emit_op (mb, CEE_LDSTR, str);
 }
 
+/**
+ * mono_mb_emit_ldarg:
+ */
 void
 mono_mb_emit_ldarg (MonoMethodBuilder *mb, guint argnum)
 {
@@ -383,6 +439,9 @@ mono_mb_emit_ldarg (MonoMethodBuilder *mb, guint argnum)
 	}
 }
 
+/**
+ * mono_mb_emit_ldarg_addr:
+ */
 void
 mono_mb_emit_ldarg_addr (MonoMethodBuilder *mb, guint argnum)
 {
@@ -396,6 +455,9 @@ mono_mb_emit_ldarg_addr (MonoMethodBuilder *mb, guint argnum)
 	}
 }
 
+/**
+ * mono_mb_emit_ldloc_addr:
+ */
 void
 mono_mb_emit_ldloc_addr (MonoMethodBuilder *mb, guint locnum)
 {
@@ -409,6 +471,9 @@ mono_mb_emit_ldloc_addr (MonoMethodBuilder *mb, guint locnum)
 	}
 }
 
+/**
+ * mono_mb_emit_ldloc:
+ */
 void
 mono_mb_emit_ldloc (MonoMethodBuilder *mb, guint num)
 {
@@ -424,6 +489,9 @@ mono_mb_emit_ldloc (MonoMethodBuilder *mb, guint num)
 	}
 }
 
+/**
+ * mono_mb_emit_stloc:
+ */
 void
 mono_mb_emit_stloc (MonoMethodBuilder *mb, guint num)
 {
@@ -439,6 +507,9 @@ mono_mb_emit_stloc (MonoMethodBuilder *mb, guint num)
 	}
 }
 
+/**
+ * mono_mb_emit_icon:
+ */
 void
 mono_mb_emit_icon (MonoMethodBuilder *mb, gint32 value)
 {
@@ -472,6 +543,9 @@ mono_mb_get_pos (MonoMethodBuilder *mb)
 	return mb->pos;
 }
 
+/**
+ * mono_mb_emit_branch:
+ */
 guint32
 mono_mb_emit_branch (MonoMethodBuilder *mb, guint8 op)
 {
@@ -525,12 +599,18 @@ mono_mb_emit_calli (MonoMethodBuilder *mb, MonoMethodSignature *sig)
 	mono_mb_emit_op (mb, CEE_CALLI, sig);
 }
 
+/**
+ * mono_mb_emit_managed_call:
+ */
 void
 mono_mb_emit_managed_call (MonoMethodBuilder *mb, MonoMethod *method, MonoMethodSignature *opt_sig)
 {
 	mono_mb_emit_op (mb, CEE_CALL, method);
 }
 
+/**
+ * mono_mb_emit_native_call:
+ */
 void
 mono_mb_emit_native_call (MonoMethodBuilder *mb, MonoMethodSignature *sig, gpointer func)
 {
@@ -550,7 +630,7 @@ mono_mb_emit_exception_full (MonoMethodBuilder *mb, const char *exc_nspace, cons
 {
 	MonoMethod *ctor = NULL;
 
-	MonoClass *mme = mono_class_from_name (mono_defaults.corlib, exc_nspace, exc_name);
+	MonoClass *mme = mono_class_load_from_name (mono_defaults.corlib, exc_nspace, exc_name);
 	mono_class_init (mme);
 	ctor = mono_class_get_method_from_name (mme, ".ctor", 0);
 	g_assert (ctor);
@@ -564,12 +644,18 @@ mono_mb_emit_exception_full (MonoMethodBuilder *mb, const char *exc_nspace, cons
 	mono_mb_emit_byte (mb, CEE_THROW);
 }
 
+/**
+ * mono_mb_emit_exception:
+ */
 void
 mono_mb_emit_exception (MonoMethodBuilder *mb, const char *exc_name, const char *msg)
 {
 	mono_mb_emit_exception_full (mb, "System", exc_name, msg);
 }
 
+/**
+ * mono_mb_emit_add_to_local:
+ */
 void
 mono_mb_emit_add_to_local (MonoMethodBuilder *mb, guint16 local, gint32 incr)
 {

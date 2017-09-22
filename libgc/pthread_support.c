@@ -205,7 +205,7 @@ static
 GC_key_t GC_thread_key;
 
 #ifdef USE_COMPILER_TLS
-__thread MONO_TLS_FAST void* GC_thread_tls;
+__thread void* GC_thread_tls;
 
 /*
  * gcc errors out with /tmp/ccdPMFuq.s:2994: Error: symbol `.LTLS4' is already defined
@@ -764,7 +764,7 @@ GC_thread GC_new_thread(pthread_t id)
     }
     if (result == 0) return(0);
     result -> id = id;
-#ifdef PLATFORM_ANDROID
+#ifdef HOST_ANDROID
     result -> kernel_id = gettid();
 #endif
     result -> next = GC_threads[hv];
